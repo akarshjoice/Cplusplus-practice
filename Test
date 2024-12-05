@@ -1,102 +1,131 @@
 import tkinter as tk
 from tkinter import ttk
+from threading import Thread, Lock
+import socket
+from fixmsg.fix_message import FixMessage  # Requires 'fixmsg' library
+
 
 class FixClientGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("FIX Client Simulator")
-        
-        # Session Management
         self.sessions = {}
         self.active_session = None
+        self.lock = Lock()
         self.init_ui()
-        
+
     def init_ui(self):
-        # Sessions Frame
+        # Session Management
         self.session_frame = tk.Frame(self.root)
         self.session_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
-        
         tk.Label(self.session_frame, text="Sessions").pack()
         self.session_listbox = tk.Listbox(self.session_frame, height=10)
         self.session_listbox.pack()
         self.session_listbox.bind("<<ListboxSelect>>", self.switch_session)
-        
         tk.Button(self.session_frame, text="Add Session", command=self.add_session).pack(pady=5)
         tk.Button(self.session_frame, text="Remove Session", command=self.remove_session).pack(pady=5)
-        
-        # Order Display
+
+        # Orders Display
         self.order_frame = tk.Frame(self.root)
         self.order_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
         tk.Label(self.order_frame, text="Orders").pack()
         self.order_tree = ttk.Treeview(self.order_frame, columns=("ID", "Type", "Symbol", "Qty", "Status"), show="headings")
         self.order_tree.pack(fill=tk.BOTH, expand=True)
-        
         for col in ("ID", "Type", "Symbol", "Qty", "Status"):
             self.order_tree.heading(col, text=col)
-        
+        self.order_tree.tag_configure("New", background="lightblue")
+        self.order_tree.tag_configure("Pending", background="yellow")
+        self.order_tree.tag_configure("Filled", background="lightgreen")
+        self.order_tree.tag_configure("Cancelled", background="red")
+
         # Message Builder
         self.message_frame = tk.Frame(self.root)
         self.message_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
-        
         tk.Label(self.message_frame, text="Message Builder").grid(row=0, column=0, columnspan=2, pady=5)
-        
         self.tag_buttons = []
         for idx, tag in enumerate(["8", "35", "49", "56"]):  # Common tags
             button = tk.Button(self.message_frame, text=f"Tag {tag}", command=lambda t=tag: self.add_tag(t))
             button.grid(row=1, column=idx, padx=5, pady=5)
             self.tag_buttons.append(button)
-        
         tk.Label(self.message_frame, text="Custom Tag:").grid(row=2, column=0, pady=5)
         self.custom_tag_entry = tk.Entry(self.message_frame)
         self.custom_tag_entry.grid(row=2, column=1, pady=5)
-        
         tk.Button(self.message_frame, text="Add Tag", command=self.add_custom_tag).grid(row=2, column=2, padx=5)
-        
         tk.Button(self.message_frame, text="Send", command=self.send_message).grid(row=3, column=0, columnspan=3, pady=10)
-        
+
     def add_session(self):
-        # Placeholder for adding a new session
         session_name = f"Session {len(self.sessions) + 1}"
-        self.sessions[session_name] = []  # Store session-specific orders
+        self.sessions[session_name] = {"orders": [], "socket": None, "host": None, "port": None}
         self.session_listbox.insert(tk.END, session_name)
         if not self.active_session:
             self.active_session = session_name
-    
+
     def remove_session(self):
-        # Placeholder for removing a session
         selected = self.session_listbox.curselection()
         if selected:
             session_name = self.session_listbox.get(selected)
-            del self.sessions[session_name]
             self.session_listbox.delete(selected)
+            if session_name in self.sessions:
+                self.sessions[session_name]["socket"].close()
+                del self.sessions[session_name]
             self.active_session = None if not self.sessions else list(self.sessions.keys())[0]
-    
+
     def switch_session(self, event):
-        # Switch to the selected session
         selected = self.session_listbox.curselection()
         if selected:
             self.active_session = self.session_listbox.get(selected)
             self.update_order_display()
-    
+
+    def connect_to_server(self, host, port):
+        try:
+            client_socket = socket.create_connection((host, port))
+            return client_socket
+        except Exception as e:
+            self.log(f"Connection failed: {e}")
+            return None
+
     def add_tag(self, tag):
         print(f"Added tag {tag}")
-    
+
     def add_custom_tag(self):
         tag = self.custom_tag_entry.get()
         if tag:
             print(f"Added custom tag {tag}")
-    
+
     def send_message(self):
-        print("Send message logic here")
-    
+        if self.active_session:
+            session_data = self.sessions[self.active_session]
+            if session_data["socket"]:
+                # Construct FIX Message
+                msg = FixMessage()
+                msg.append_pair(8, "FIX.4.4")  # BeginString
+                msg.append_pair(35, "D")       # MessageType
+                msg.append_pair(55, "AAPL")    # Symbol
+                msg.append_pair(54, "1")       # Side
+                msg.append_pair(44, "150.00")  # Price
+                session_data["socket"].sendall(str(msg).encode())
+                self.log(f"Sent: {str(msg)}")
+                # Add to orders table
+                self.add_order({"ID": "12345", "Type": "NewOrderSingle", "Symbol": "AAPL", "Qty": "100", "Status": "New"})
+
+    def add_order(self, order):
+        if self.active_session:
+            session_data = self.sessions[self.active_session]
+            session_data["orders"].append(order)
+            self.update_order_display()
+
     def update_order_display(self):
-        # Update orders table for the active session
         for row in self.order_tree.get_children():
             self.order_tree.delete(row)
         if self.active_session:
-            for order in self.sessions[self.active_session]:
-                self.order_tree.insert("", tk.END, values=order)
+            session_data = self.sessions[self.active_session]
+            for order in session_data["orders"]:
+                self.order_tree.insert("", tk.END, values=(order["ID"], order["Type"], order["Symbol"], order["Qty"], order["Status"]),
+                                       tags=(order["Status"],))
+
+    def log(self, message):
+        print(message)  # Replace with a dedicated logging window if needed
+
 
 if __name__ == "__main__":
     root = tk.Tk()
