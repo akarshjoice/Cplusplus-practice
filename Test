@@ -1,70 +1,104 @@
 import tkinter as tk
 from tkinter import ttk
-import socket
 
-class FixClientSim:
+class FixClientGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("FIX Client Simulator")
+        
+        # Session Management
+        self.sessions = {}
+        self.active_session = None
         self.init_ui()
-        self.client_socket = None
-
+        
     def init_ui(self):
-        # Connection Section
-        conn_frame = tk.Frame(self.root)
-        tk.Label(conn_frame, text="Host:").grid(row=0, column=0)
-        self.host_entry = tk.Entry(conn_frame)
-        self.host_entry.grid(row=0, column=1)
-        tk.Label(conn_frame, text="Port:").grid(row=0, column=2)
-        self.port_entry = tk.Entry(conn_frame)
-        self.port_entry.grid(row=0, column=3)
-        tk.Button(conn_frame, text="Connect", command=self.connect).grid(row=0, column=4)
-        tk.Button(conn_frame, text="Disconnect", command=self.disconnect).grid(row=0, column=5)
-        conn_frame.pack(pady=5)
-
-        # Message Section
-        msg_frame = tk.Frame(self.root)
-        tk.Label(msg_frame, text="Message:").grid(row=0, column=0)
-        self.message_entry = tk.Entry(msg_frame, width=50)
-        self.message_entry.grid(row=0, column=1)
-        tk.Button(msg_frame, text="Send", command=self.send_message).grid(row=0, column=2)
-        msg_frame.pack(pady=5)
-
-        # Logs Section
-        logs_frame = tk.Frame(self.root)
-        tk.Label(logs_frame, text="Logs:").pack()
-        self.logs = tk.Text(logs_frame, height=10, width=80)
-        self.logs.pack()
-        logs_frame.pack(pady=5)
-
-    def connect(self):
-        host = self.host_entry.get()
-        port = int(self.port_entry.get())
-        try:
-            self.client_socket = socket.create_connection((host, port))
-            self.log(f"Connected to {host}:{port}")
-        except Exception as e:
-            self.log(f"Connection failed: {e}")
-
-    def disconnect(self):
-        if self.client_socket:
-            self.client_socket.close()
-            self.client_socket = None
-            self.log("Disconnected")
-
+        # Sessions Frame
+        self.session_frame = tk.Frame(self.root)
+        self.session_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
+        
+        tk.Label(self.session_frame, text="Sessions").pack()
+        self.session_listbox = tk.Listbox(self.session_frame, height=10)
+        self.session_listbox.pack()
+        self.session_listbox.bind("<<ListboxSelect>>", self.switch_session)
+        
+        tk.Button(self.session_frame, text="Add Session", command=self.add_session).pack(pady=5)
+        tk.Button(self.session_frame, text="Remove Session", command=self.remove_session).pack(pady=5)
+        
+        # Order Display
+        self.order_frame = tk.Frame(self.root)
+        self.order_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        tk.Label(self.order_frame, text="Orders").pack()
+        self.order_tree = ttk.Treeview(self.order_frame, columns=("ID", "Type", "Symbol", "Qty", "Status"), show="headings")
+        self.order_tree.pack(fill=tk.BOTH, expand=True)
+        
+        for col in ("ID", "Type", "Symbol", "Qty", "Status"):
+            self.order_tree.heading(col, text=col)
+        
+        # Message Builder
+        self.message_frame = tk.Frame(self.root)
+        self.message_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
+        
+        tk.Label(self.message_frame, text="Message Builder").grid(row=0, column=0, columnspan=2, pady=5)
+        
+        self.tag_buttons = []
+        for idx, tag in enumerate(["8", "35", "49", "56"]):  # Common tags
+            button = tk.Button(self.message_frame, text=f"Tag {tag}", command=lambda t=tag: self.add_tag(t))
+            button.grid(row=1, column=idx, padx=5, pady=5)
+            self.tag_buttons.append(button)
+        
+        tk.Label(self.message_frame, text="Custom Tag:").grid(row=2, column=0, pady=5)
+        self.custom_tag_entry = tk.Entry(self.message_frame)
+        self.custom_tag_entry.grid(row=2, column=1, pady=5)
+        
+        tk.Button(self.message_frame, text="Add Tag", command=self.add_custom_tag).grid(row=2, column=2, padx=5)
+        
+        tk.Button(self.message_frame, text="Send", command=self.send_message).grid(row=3, column=0, columnspan=3, pady=10)
+        
+    def add_session(self):
+        # Placeholder for adding a new session
+        session_name = f"Session {len(self.sessions) + 1}"
+        self.sessions[session_name] = []  # Store session-specific orders
+        self.session_listbox.insert(tk.END, session_name)
+        if not self.active_session:
+            self.active_session = session_name
+    
+    def remove_session(self):
+        # Placeholder for removing a session
+        selected = self.session_listbox.curselection()
+        if selected:
+            session_name = self.session_listbox.get(selected)
+            del self.sessions[session_name]
+            self.session_listbox.delete(selected)
+            self.active_session = None if not self.sessions else list(self.sessions.keys())[0]
+    
+    def switch_session(self, event):
+        # Switch to the selected session
+        selected = self.session_listbox.curselection()
+        if selected:
+            self.active_session = self.session_listbox.get(selected)
+            self.update_order_display()
+    
+    def add_tag(self, tag):
+        print(f"Added tag {tag}")
+    
+    def add_custom_tag(self):
+        tag = self.custom_tag_entry.get()
+        if tag:
+            print(f"Added custom tag {tag}")
+    
     def send_message(self):
-        if self.client_socket:
-            message = self.message_entry.get()
-            self.client_socket.sendall(message.encode())
-            self.log(f"Sent: {message}")
-        else:
-            self.log("Not connected")
-
-    def log(self, message):
-        self.logs.insert(tk.END, message + "\n")
-        self.logs.see(tk.END)
+        print("Send message logic here")
+    
+    def update_order_display(self):
+        # Update orders table for the active session
+        for row in self.order_tree.get_children():
+            self.order_tree.delete(row)
+        if self.active_session:
+            for order in self.sessions[self.active_session]:
+                self.order_tree.insert("", tk.END, values=order)
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = FixClientSim(root)
+    app = FixClientGUI(root)
     root.mainloop()
