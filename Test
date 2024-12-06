@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, simpledialog
+from tkinter import ttk
 
 
 class FixClientSimulator(tk.Tk):
@@ -13,12 +13,34 @@ class FixClientSimulator(tk.Tk):
         self.config(menu=self.menu_bar)
         self.menu_bar.add_command(label="Add Session", command=self.show_add_session_form)
 
-        # Order Frame with Column Names
-        order_frame = ttk.LabelFrame(self, text="Orders")
-        order_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Order Input Frame
+        self.add_order_frame = ttk.LabelFrame(self, text="Add Order")
+        self.add_order_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        self.order_canvas = tk.Canvas(order_frame)
-        self.order_scrollbar = ttk.Scrollbar(order_frame, orient="vertical", command=self.order_canvas.yview)
+        ttk.Label(self.add_order_frame, text="Client Order ID:").grid(row=0, column=0, padx=5, pady=5)
+        self.order_id_entry = ttk.Entry(self.add_order_frame)
+        self.order_id_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        ttk.Label(self.add_order_frame, text="Price:").grid(row=0, column=2, padx=5, pady=5)
+        self.price_entry = ttk.Entry(self.add_order_frame)
+        self.price_entry.grid(row=0, column=3, padx=5, pady=5)
+
+        ttk.Label(self.add_order_frame, text="Quantity:").grid(row=0, column=4, padx=5, pady=5)
+        self.quantity_entry = ttk.Entry(self.add_order_frame)
+        self.quantity_entry.grid(row=0, column=5, padx=5, pady=5)
+
+        ttk.Label(self.add_order_frame, text="Session Name:").grid(row=0, column=6, padx=5, pady=5)
+        self.session_entry = ttk.Entry(self.add_order_frame)
+        self.session_entry.grid(row=0, column=7, padx=5, pady=5)
+
+        ttk.Button(self.add_order_frame, text="Add Order", command=self.add_order).grid(row=0, column=8, padx=5, pady=5)
+
+        # Order Frame with Column Names
+        self.order_frame = ttk.LabelFrame(self, text="Orders")
+        self.order_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.order_canvas = tk.Canvas(self.order_frame)
+        self.order_scrollbar = ttk.Scrollbar(self.order_frame, orient="vertical", command=self.order_canvas.yview)
         self.order_canvas.configure(yscrollcommand=self.order_scrollbar.set)
 
         self.order_table_frame = ttk.Frame(self.order_canvas)
@@ -39,32 +61,24 @@ class FixClientSimulator(tk.Tk):
         self.order_row = 1  # Track rows for adding new orders
 
         # Detail Frame
-        detail_frame = ttk.LabelFrame(self, text="Order Details and Responses")
-        detail_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        self.detail_canvas = tk.Canvas(detail_frame)
-        self.detail_scrollbar = ttk.Scrollbar(detail_frame, orient="vertical", command=self.detail_canvas.yview)
-        self.detail_canvas.configure(yscrollcommand=self.detail_scrollbar.set)
-
-        self.detail_table_frame = ttk.Frame(self.detail_canvas)
-        self.detail_table_frame.bind(
-            "<Configure>",
-            lambda e: self.detail_canvas.configure(scrollregion=self.detail_canvas.bbox("all")),
-        )
-        self.detail_canvas.create_window((0, 0), window=self.detail_table_frame, anchor="nw")
-        self.detail_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.detail_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Response Details
-        self.response_detail_frame = ttk.LabelFrame(self, text="Response Details")
-        self.response_detail_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.detail_frame = ttk.LabelFrame(self, text="Order Details and Responses")
+        self.detail_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Footer Tabs
         self.footer_tabs = ttk.Notebook(self)
         self.footer_tabs.pack(side=tk.BOTTOM, fill=tk.X)
 
-    def add_order(self, clorid, price, quantity, session):
-        """Add an order to the order frame."""
+    def add_order(self):
+        """Add an order to the order table dynamically."""
+        clorid = self.order_id_entry.get()
+        price = self.price_entry.get()
+        quantity = self.quantity_entry.get()
+        session = self.session_entry.get()
+
+        if not clorid or not price or not quantity or not session:
+            tk.messagebox.showwarning("Missing Data", "All fields must be filled!")
+            return
+
         order = {"clorid": clorid, "price": price, "quantity": quantity, "session": session, "responses": []}
         self.orders.append(order)
 
@@ -73,52 +87,33 @@ class FixClientSimulator(tk.Tk):
         ttk.Label(self.order_table_frame, text=quantity).grid(row=self.order_row, column=2, padx=5, pady=5)
         ttk.Label(self.order_table_frame, text=session).grid(row=self.order_row, column=3, padx=5, pady=5)
 
-        # Clickable order
+        # Bind click event to show responses
         row = self.order_row
         for col in range(4):
             self.order_table_frame.grid_slaves(row=row, column=col)[0].bind(
                 "<Button-1>", lambda e, o=order: self.show_order_responses(o)
             )
+
         self.order_row += 1
+        self.clear_order_form()
+
+    def clear_order_form(self):
+        """Clear the order input form."""
+        self.order_id_entry.delete(0, tk.END)
+        self.price_entry.delete(0, tk.END)
+        self.quantity_entry.delete(0, tk.END)
+        self.session_entry.delete(0, tk.END)
 
     def show_order_responses(self, order):
-        """Display order responses in the detail table."""
-        # Clear previous responses
-        for widget in self.detail_table_frame.winfo_children():
+        """Display order responses in the detail frame."""
+        for widget in self.detail_frame.winfo_children():
             widget.destroy()
 
-        # Add column headers for responses
-        headers = ["Response ID", "Response Text"]
-        for col, header in enumerate(headers):
-            ttk.Label(self.detail_table_frame, text=header, font=("Arial", 10, "bold")).grid(row=0, column=col, padx=5, pady=5)
+        ttk.Label(self.detail_frame, text=f"Details for Order {order['clorid']}", font=("Arial", 12, "bold")).pack(anchor="w", padx=10, pady=5)
 
-        # Mock responses for this order
-        order["responses"] = [
-            {"response_id": "R1", "text": f"Response 1 for {order['clorid']}"},
-            {"response_id": "R2", "text": f"Response 2 for {order['clorid']}"},
-        ]
-
-        # Add responses to the table
-        for row, response in enumerate(order["responses"], start=1):
-            ttk.Label(self.detail_table_frame, text=response["response_id"]).grid(row=row, column=0, padx=5, pady=5)
-            ttk.Label(self.detail_table_frame, text=response["text"]).grid(row=row, column=1, padx=5, pady=5)
-
-            # Bind click event for response
-            self.detail_table_frame.grid_slaves(row=row, column=1)[0].bind(
-                "<Button-1>", lambda e, r=response: self.show_response_details(r)
-            )
-
-    def show_response_details(self, response):
-        """Display all FIX tags in the response detail frame."""
-        # Clear previous details
-        for widget in self.response_detail_frame.winfo_children():
-            widget.destroy()
-
-        # Display tags
-        ttk.Label(self.response_detail_frame, text="FIX Tags for Response").pack(anchor="nw", padx=5, pady=5)
-        tags = {"Tag1": "Value1", "Tag2": "Value2", "Tag3": "Value3"}  # Mock tags
-        for tag, value in tags.items():
-            ttk.Label(self.response_detail_frame, text=f"{tag}: {value}").pack(anchor="nw", padx=10)
+        # Mock response data for demonstration
+        ttk.Label(self.detail_frame, text="Response 1: FIX tag details").pack(anchor="w", padx=10)
+        ttk.Label(self.detail_frame, text="Response 2: FIX tag details").pack(anchor="w", padx=10)
 
     def show_add_session_form(self):
         """Display a form for adding a new session."""
