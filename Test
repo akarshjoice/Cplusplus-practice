@@ -30,9 +30,6 @@ class FixClientSimulator(tk.Tk):
         self.order_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.order_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Double-click to show details
-        self.order_display_frame.bind("<Double-1>", self.show_order_details)
-
         # Detail Display for Orders and Responses
         self.detail_frame = ttk.LabelFrame(self, text="Order Details and Responses")
         self.detail_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
