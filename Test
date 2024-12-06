@@ -12,6 +12,9 @@ class FixClientSimulator(tk.Tk):
         self.sessions = {}  # Stores session configurations
         self.logs = []      # Stores log messages
         
+        # Initialize testing framework
+        self.testing_framework = TestingFramework()
+
         # Create GUI
         self.create_menu_bar()
         self.create_main_layout()
@@ -42,11 +45,12 @@ class FixClientSimulator(tk.Tk):
         # Right: Logs Panel
         self.frame_logs = ttk.Notebook(self)
         self.frame_logs.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        self.log_viewer = LogViewer(self.frame_logs)
+        self.frame_logs.add(self.log_viewer, text="Logs")
 
         # Bottom: Message Creation Panel
-        self.frame_message_creation = ttk.Frame(self, padding="5")
+        self.frame_message_creation = MessageCreationForm(self)
         self.frame_message_creation.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
-        ttk.Label(self.frame_message_creation, text="Message Creation", font=("Arial", 12, "bold")).pack(anchor="w")
 
         # Expandable configuration
         self.grid_rowconfigure(0, weight=1)
@@ -80,11 +84,8 @@ class FixClientSimulator(tk.Tk):
 
     def run_test(self):
         """Runs a predefined test scenario."""
-        messagebox.showinfo("Run Test", "Test scenario execution started.")
-
-if __name__ == "__main__":
-    app = FixClientSimulator()
-    app.mainloop()
+        self.testing_framework.execute_test_cases()
+        messagebox.showinfo("Run Test", "Test scenario execution completed.")
 
 class MessageCreationForm(ttk.Frame):
     def __init__(self, parent):
@@ -122,6 +123,7 @@ class MessageCreationForm(ttk.Frame):
         """Handles sending the created message."""
         message = {tag: entry.get() for tag, entry in self.fields.items()}
         print("Message Sent:", message)
+        self.master.log_viewer.add_log(f"Message Sent: {message}")
 
 class LogViewer(ttk.Frame):
     def __init__(self, parent):
@@ -146,3 +148,8 @@ class TestingFramework:
         for test in self.test_cases:
             print(f"Executing {test['name']}")
             # Simulate workflow here
+            messagebox.showinfo("Test Execution", f"Test case {test['name']} executed.")
+
+if __name__ == "__main__":
+    app = FixClientSimulator()
+    app.mainloop()
