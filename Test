@@ -1,115 +1,94 @@
 import tkinter as tk
 from tkinter import ttk
-from threading import Thread, Lock
-import socket
-from fixmsg.fix_message import FixMessage  # Requires 'fixmsg' library
 
 
-class FixClientGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("FIX Client Simulator")
-        self.sessions = {}
-        self.active_session = None
-        self.lock = Lock()
-        self.init_ui()
+class FixClientSimulator(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("FIX Client Simulator")
+        self.geometry("1200x800")
 
-    def init_ui(self):
-        # Session Management
-        self.session_frame = tk.Frame(self.root)
-        self.session_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
-        tk.Label(self.session_frame, text="Sessions").pack()
-        self.session_listbox = tk.Listbox(self.session_frame, height=10)
-        self.session_listbox.pack()
-        self.session_listbox.bind("<<ListboxSelect>>", self.switch_session)
-        tk.Button(self.session_frame, text="Add Session", command=self.show_add_session_window).pack(pady=5)
-        tk.Button(self.session_frame, text="Remove Session", command=self.remove_session).pack(pady=5)
+        # Menu bar
+        self.menu_bar = tk.Menu(self)
+        self.config(menu=self.menu_bar)
+        self.menu_bar.add_command(label="Add Session", command=self.add_session)
 
-        # Orders Display
-        self.order_frame = tk.Frame(self.root)
-        self.order_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
-        tk.Label(self.order_frame, text="Orders").pack()
-        self.order_tree = ttk.Treeview(self.order_frame, columns=("ID", "Type", "Symbol", "Qty", "Status"), show="headings")
-        self.order_tree.pack(fill=tk.BOTH, expand=True)
-        for col in ("ID", "Type", "Symbol", "Qty", "Status"):
-            self.order_tree.heading(col, text=col)
+        # Frame A: Orders Display
+        self.frame_a = ttk.Treeview(self, columns=("Client Order ID", "Price", "Quantity", "Session"), show="headings")
+        self.frame_a.heading("Client Order ID", text="Client Order ID")
+        self.frame_a.heading("Price", text="Price")
+        self.frame_a.heading("Quantity", text="Quantity")
+        self.frame_a.heading("Session", text="Session")
+        self.frame_a.pack(fill=tk.BOTH, expand=True)
+        self.frame_a.bind("<Double-1>", self.show_order_details)
 
-    def show_add_session_window(self):
-        """Show a popup window for adding a session."""
-        self.add_session_window = tk.Toplevel(self.root)
-        self.add_session_window.title("Add Session")
+        # Example data
+        self.frame_a.insert("", "end", values=("12345", "100.5", "200", "Session 1"))
 
-        tk.Label(self.add_session_window, text="Session Name:").grid(row=0, column=0, padx=10, pady=5, sticky=tk.W)
-        self.session_name_entry = tk.Entry(self.add_session_window)
-        self.session_name_entry.grid(row=0, column=1, padx=10, pady=5)
+        # Footer Tabs
+        self.footer_tabs = ttk.Notebook(self)
+        self.footer_tabs.pack(side=tk.BOTTOM, fill=tk.X)
 
-        tk.Label(self.add_session_window, text="IP Address:").grid(row=1, column=0, padx=10, pady=5, sticky=tk.W)
-        self.session_ip_entry = tk.Entry(self.add_session_window)
-        self.session_ip_entry.grid(row=1, column=1, padx=10, pady=5)
-
-        tk.Label(self.add_session_window, text="Port:").grid(row=2, column=0, padx=10, pady=5, sticky=tk.W)
-        self.session_port_entry = tk.Entry(self.add_session_window)
-        self.session_port_entry.grid(row=2, column=1, padx=10, pady=5)
-
-        tk.Label(self.add_session_window, text="Sender Comp ID:").grid(row=3, column=0, padx=10, pady=5, sticky=tk.W)
-        self.sender_comp_id_entry = tk.Entry(self.add_session_window)
-        self.sender_comp_id_entry.grid(row=3, column=1, padx=10, pady=5)
-
-        tk.Label(self.add_session_window, text="Target Comp ID:").grid(row=4, column=0, padx=10, pady=5, sticky=tk.W)
-        self.target_comp_id_entry = tk.Entry(self.add_session_window)
-        self.target_comp_id_entry.grid(row=4, column=1, padx=10, pady=5)
-
-        tk.Button(self.add_session_window, text="Add", command=self.add_session).grid(row=5, column=0, columnspan=2, pady=10)
+        # Add first session
+        self.add_session()
 
     def add_session(self):
-        """Add session details after user input."""
-        session_name = self.session_name_entry.get()
-        ip_address = self.session_ip_entry.get()
-        port = self.session_port_entry.get()
-        sender_comp_id = self.sender_comp_id_entry.get()
-        target_comp_id = self.target_comp_id_entry.get()
+        session_frame = ttk.Frame(self.footer_tabs)
+        self.footer_tabs.add(session_frame, text=f"Session {len(self.footer_tabs.tabs()) + 1}")
 
-        if not session_name or not ip_address or not port or not sender_comp_id or not target_comp_id:
-            tk.messagebox.showerror("Error", "All fields must be filled!")
+        # Session-specific FIX Tags Frame
+        tags_frame = ttk.LabelFrame(session_frame, text="FIX Tags")
+        tags_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Mandatory FIX tags
+        ttk.Label(tags_frame, text="Mandatory FIX Tags:").pack(anchor="nw", padx=5, pady=5)
+        mandatory_tags = ["Tag1", "Tag2", "Tag3"]
+        for tag in mandatory_tags:
+            ttk.Label(tags_frame, text=f"{tag}:").pack(anchor="nw", padx=10)
+
+        # Scrollable Additional Tags
+        additional_frame = ttk.LabelFrame(session_frame, text="Additional Tags")
+        additional_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        canvas = tk.Canvas(additional_frame)
+        scroll_y = ttk.Scrollbar(additional_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scroll_y.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+
+        ttk.Button(scrollable_frame, text="Add Tag", command=lambda: self.add_new_tag(scrollable_frame)).pack(anchor="nw", pady=5)
+
+    def add_new_tag(self, frame):
+        row = len(frame.winfo_children())
+        ttk.Entry(frame).pack(anchor="nw", pady=5)
+
+    def show_order_details(self, event):
+        selected_item = self.frame_a.selection()
+        if not selected_item:
             return
 
-        try:
-            port = int(port)  # Validate port number
-            self.sessions[session_name] = {
-                "ip": ip_address,
-                "port": port,
-                "sender_comp_id": sender_comp_id,
-                "target_comp_id": target_comp_id,
-                "orders": [],
-                "socket": None,
-            }
-            self.session_listbox.insert(tk.END, session_name)
-            self.active_session = session_name if not self.active_session else self.active_session
-            self.add_session_window.destroy()
-        except ValueError:
-            tk.messagebox.showerror("Error", "Port must be an integer!")
+        order_details = self.frame_a.item(selected_item, "values")
 
-    def remove_session(self):
-        selected = self.session_listbox.curselection()
-        if selected:
-            session_name = self.session_listbox.get(selected)
-            self.session_listbox.delete(selected)
-            if session_name in self.sessions:
-                self.sessions[session_name]["socket"].close()
-                del self.sessions[session_name]
-            self.active_session = None if not self.sessions else list(self.sessions.keys())[0]
+        # Create a new window for order details
+        order_window = tk.Toplevel(self)
+        order_window.title("Order Details")
+        ttk.Label(order_window, text=f"Order Details: {order_details}").pack(pady=10)
 
-    def switch_session(self, event):
-        selected = self.session_listbox.curselection()
-        if selected:
-            self.active_session = self.session_listbox.get(selected)
-            self.update_order_display()
-
-    def update_order_display(self):
-        pass  # Placeholder for updating the order table
+        # Example response details
+        ttk.Label(order_window, text="Responses:").pack(anchor="nw", padx=10, pady=5)
+        response_list = ["Response 1", "Response 2"]
+        for response in response_list:
+            ttk.Label(order_window, text=response).pack(anchor="nw", padx=20)
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = FixClientGUI(root)
-    root.mainloop()
+    app = FixClientSimulator()
+    app.mainloop()
