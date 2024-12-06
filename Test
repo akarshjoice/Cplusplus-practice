@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, simpledialog
 
 
 class FixClientSimulator(tk.Tk):
@@ -11,9 +11,9 @@ class FixClientSimulator(tk.Tk):
         # Menu bar
         self.menu_bar = tk.Menu(self)
         self.config(menu=self.menu_bar)
-        self.menu_bar.add_command(label="Add Session", command=self.add_session)
+        self.menu_bar.add_command(label="Add Session", command=self.show_add_session_form)
 
-        # Order Display with Scrollbar
+        # Order Frame with Column Names
         order_frame = ttk.LabelFrame(self, text="Orders")
         order_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -21,111 +21,145 @@ class FixClientSimulator(tk.Tk):
         self.order_scrollbar = ttk.Scrollbar(order_frame, orient="vertical", command=self.order_canvas.yview)
         self.order_canvas.configure(yscrollcommand=self.order_scrollbar.set)
 
-        self.order_display_frame = ttk.Frame(self.order_canvas)
-        self.order_display_frame.bind(
+        self.order_table_frame = ttk.Frame(self.order_canvas)
+        self.order_table_frame.bind(
             "<Configure>",
             lambda e: self.order_canvas.configure(scrollregion=self.order_canvas.bbox("all")),
         )
-        self.order_canvas.create_window((0, 0), window=self.order_display_frame, anchor="nw")
+        self.order_canvas.create_window((0, 0), window=self.order_table_frame, anchor="nw")
         self.order_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.order_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Detail Display for Orders and Responses
-        self.detail_frame = ttk.LabelFrame(self, text="Order Details and Responses")
-        self.detail_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Add column headers
+        headers = ["Client Order ID", "Price", "Quantity", "Session Name"]
+        for col, header in enumerate(headers):
+            ttk.Label(self.order_table_frame, text=header, font=("Arial", 10, "bold")).grid(row=0, column=col, padx=5, pady=5)
 
-        self.detail_canvas = tk.Canvas(self.detail_frame)
-        self.detail_scrollbar = ttk.Scrollbar(self.detail_frame, orient="vertical", command=self.detail_canvas.yview)
+        self.orders = []
+        self.order_row = 1  # Track rows for adding new orders
+
+        # Detail Frame
+        detail_frame = ttk.LabelFrame(self, text="Order Details and Responses")
+        detail_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.detail_canvas = tk.Canvas(detail_frame)
+        self.detail_scrollbar = ttk.Scrollbar(detail_frame, orient="vertical", command=self.detail_canvas.yview)
         self.detail_canvas.configure(yscrollcommand=self.detail_scrollbar.set)
 
-        self.detail_display_frame = ttk.Frame(self.detail_canvas)
-        self.detail_display_frame.bind(
+        self.detail_table_frame = ttk.Frame(self.detail_canvas)
+        self.detail_table_frame.bind(
             "<Configure>",
             lambda e: self.detail_canvas.configure(scrollregion=self.detail_canvas.bbox("all")),
         )
-        self.detail_canvas.create_window((0, 0), window=self.detail_display_frame, anchor="nw")
+        self.detail_canvas.create_window((0, 0), window=self.detail_table_frame, anchor="nw")
         self.detail_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.detail_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Response Details
+        self.response_detail_frame = ttk.LabelFrame(self, text="Response Details")
+        self.response_detail_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Footer Tabs
         self.footer_tabs = ttk.Notebook(self)
         self.footer_tabs.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # Sample data
-        self.orders = []
-        self.add_order("12345", "100.5", "200", "Session 1")
-        self.add_order("12345", "101.0", "150", "Session 1")
-        self.add_order("67890", "200.0", "300", "Session 2")
-
-        # Add first session tab
-        self.add_session()
-
     def add_order(self, clorid, price, quantity, session):
-        """Add an order to the display."""
-        order = {"clorid": clorid, "price": price, "quantity": quantity, "session": session}
+        """Add an order to the order frame."""
+        order = {"clorid": clorid, "price": price, "quantity": quantity, "session": session, "responses": []}
         self.orders.append(order)
 
-        # Add to GUI
-        order_label = ttk.Label(self.order_display_frame, text=f"{clorid}: {price} x {quantity} ({session})")
-        order_label.pack(anchor="nw", padx=5, pady=2)
-        order_label.bind("<Button-1>", lambda e, o=order: self.show_order_responses(o))
+        ttk.Label(self.order_table_frame, text=clorid).grid(row=self.order_row, column=0, padx=5, pady=5)
+        ttk.Label(self.order_table_frame, text=price).grid(row=self.order_row, column=1, padx=5, pady=5)
+        ttk.Label(self.order_table_frame, text=quantity).grid(row=self.order_row, column=2, padx=5, pady=5)
+        ttk.Label(self.order_table_frame, text=session).grid(row=self.order_row, column=3, padx=5, pady=5)
+
+        # Clickable order
+        row = self.order_row
+        for col in range(4):
+            self.order_table_frame.grid_slaves(row=row, column=col)[0].bind(
+                "<Button-1>", lambda e, o=order: self.show_order_responses(o)
+            )
+        self.order_row += 1
 
     def show_order_responses(self, order):
-        """Show order and responses in the detail frame."""
-        # Clear previous details
-        for widget in self.detail_display_frame.winfo_children():
+        """Display order responses in the detail table."""
+        # Clear previous responses
+        for widget in self.detail_table_frame.winfo_children():
             widget.destroy()
 
-        # Display order details
-        ttk.Label(self.detail_display_frame, text=f"Order Details for {order['clorid']}").pack(anchor="nw", padx=5, pady=5)
-        ttk.Label(self.detail_display_frame, text=f"Price: {order['price']}").pack(anchor="nw", padx=5)
-        ttk.Label(self.detail_display_frame, text=f"Quantity: {order['quantity']}").pack(anchor="nw", padx=5)
-        ttk.Label(self.detail_display_frame, text=f"Session: {order['session']}").pack(anchor="nw", padx=5)
+        # Add column headers for responses
+        headers = ["Response ID", "Response Text"]
+        for col, header in enumerate(headers):
+            ttk.Label(self.detail_table_frame, text=header, font=("Arial", 10, "bold")).grid(row=0, column=col, padx=5, pady=5)
 
-        # Mock responses
-        ttk.Label(self.detail_display_frame, text="Responses:").pack(anchor="nw", padx=5, pady=10)
-        responses = [f"Response 1 for {order['clorid']}", f"Response 2 for {order['clorid']}"]
-        for response in responses:
-            ttk.Label(self.detail_display_frame, text=response).pack(anchor="nw", padx=20)
+        # Mock responses for this order
+        order["responses"] = [
+            {"response_id": "R1", "text": f"Response 1 for {order['clorid']}"},
+            {"response_id": "R2", "text": f"Response 2 for {order['clorid']}"},
+        ]
 
-    def add_session(self):
+        # Add responses to the table
+        for row, response in enumerate(order["responses"], start=1):
+            ttk.Label(self.detail_table_frame, text=response["response_id"]).grid(row=row, column=0, padx=5, pady=5)
+            ttk.Label(self.detail_table_frame, text=response["text"]).grid(row=row, column=1, padx=5, pady=5)
+
+            # Bind click event for response
+            self.detail_table_frame.grid_slaves(row=row, column=1)[0].bind(
+                "<Button-1>", lambda e, r=response: self.show_response_details(r)
+            )
+
+    def show_response_details(self, response):
+        """Display all FIX tags in the response detail frame."""
+        # Clear previous details
+        for widget in self.response_detail_frame.winfo_children():
+            widget.destroy()
+
+        # Display tags
+        ttk.Label(self.response_detail_frame, text="FIX Tags for Response").pack(anchor="nw", padx=5, pady=5)
+        tags = {"Tag1": "Value1", "Tag2": "Value2", "Tag3": "Value3"}  # Mock tags
+        for tag, value in tags.items():
+            ttk.Label(self.response_detail_frame, text=f"{tag}: {value}").pack(anchor="nw", padx=10)
+
+    def show_add_session_form(self):
+        """Display a form for adding a new session."""
+        form = tk.Toplevel(self)
+        form.title("Add Session")
+        form.geometry("400x300")
+
+        # Session Name
+        ttk.Label(form, text="Session Name:").pack(pady=10, anchor="w", padx=20)
+        session_name_entry = ttk.Entry(form)
+        session_name_entry.pack(padx=20, fill=tk.X)
+
+        # IP Address
+        ttk.Label(form, text="IP Address:").pack(pady=10, anchor="w", padx=20)
+        ip_entry = ttk.Entry(form)
+        ip_entry.pack(padx=20, fill=tk.X)
+
+        # Port
+        ttk.Label(form, text="Port:").pack(pady=10, anchor="w", padx=20)
+        port_entry = ttk.Entry(form)
+        port_entry.pack(padx=20, fill=tk.X)
+
+        # Add Button
+        def add_session():
+            session_name = session_name_entry.get()
+            ip = ip_entry.get()
+            port = port_entry.get()
+            if session_name and ip and port:
+                self.add_session(session_name, ip, port)
+                form.destroy()
+
+        ttk.Button(form, text="Add Session", command=add_session).pack(pady=20)
+
+    def add_session(self, session_name, ip, port):
         """Add a new session tab."""
         session_frame = ttk.Frame(self.footer_tabs)
-        self.footer_tabs.add(session_frame, text=f"Session {len(self.footer_tabs.tabs()) + 1}")
+        self.footer_tabs.add(session_frame, text=session_name)
 
-        # Session-specific FIX Tags Frame
-        tags_frame = ttk.LabelFrame(session_frame, text="FIX Tags")
-        tags_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # Mandatory FIX tags
-        ttk.Label(tags_frame, text="Mandatory FIX Tags:").pack(anchor="nw", padx=5, pady=5)
-        mandatory_tags = ["Tag1", "Tag2", "Tag3"]
-        for tag in mandatory_tags:
-            ttk.Label(tags_frame, text=f"{tag}:").pack(anchor="nw", padx=10)
-
-        # Scrollable Additional Tags
-        additional_frame = ttk.LabelFrame(session_frame, text="Additional Tags")
-        additional_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        canvas = tk.Canvas(additional_frame)
-        scroll_y = ttk.Scrollbar(additional_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scroll_y.set)
-
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-
-        ttk.Button(scrollable_frame, text="Add Tag", command=lambda: self.add_new_tag(scrollable_frame)).pack(anchor="nw", pady=5)
-
-    def add_new_tag(self, frame):
-        """Add a new FIX tag dynamically."""
-        ttk.Entry(frame).pack(anchor="nw", pady=5)
+        ttk.Label(session_frame, text=f"Session: {session_name}").pack(pady=10)
+        ttk.Label(session_frame, text=f"IP Address: {ip}").pack(pady=5)
+        ttk.Label(session_frame, text=f"Port: {port}").pack(pady=5)
 
 
 if __name__ == "__main__":
