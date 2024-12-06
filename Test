@@ -13,26 +13,86 @@ class FixClientSimulator(tk.Tk):
         self.config(menu=self.menu_bar)
         self.menu_bar.add_command(label="Add Session", command=self.add_session)
 
-        # Frame A: Orders Display
-        self.frame_a = ttk.Treeview(self, columns=("Client Order ID", "Price", "Quantity", "Session"), show="headings")
-        self.frame_a.heading("Client Order ID", text="Client Order ID")
-        self.frame_a.heading("Price", text="Price")
-        self.frame_a.heading("Quantity", text="Quantity")
-        self.frame_a.heading("Session", text="Session")
-        self.frame_a.pack(fill=tk.BOTH, expand=True)
-        self.frame_a.bind("<Double-1>", self.show_order_details)
+        # Order Display with Scrollbar
+        order_frame = ttk.LabelFrame(self, text="Orders")
+        order_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Example data
-        self.frame_a.insert("", "end", values=("12345", "100.5", "200", "Session 1"))
+        self.order_canvas = tk.Canvas(order_frame)
+        self.order_scrollbar = ttk.Scrollbar(order_frame, orient="vertical", command=self.order_canvas.yview)
+        self.order_canvas.configure(yscrollcommand=self.order_scrollbar.set)
+
+        self.order_display_frame = ttk.Frame(self.order_canvas)
+        self.order_display_frame.bind(
+            "<Configure>",
+            lambda e: self.order_canvas.configure(scrollregion=self.order_canvas.bbox("all")),
+        )
+        self.order_canvas.create_window((0, 0), window=self.order_display_frame, anchor="nw")
+        self.order_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.order_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Double-click to show details
+        self.order_display_frame.bind("<Double-1>", self.show_order_details)
+
+        # Detail Display for Orders and Responses
+        self.detail_frame = ttk.LabelFrame(self, text="Order Details and Responses")
+        self.detail_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.detail_canvas = tk.Canvas(self.detail_frame)
+        self.detail_scrollbar = ttk.Scrollbar(self.detail_frame, orient="vertical", command=self.detail_canvas.yview)
+        self.detail_canvas.configure(yscrollcommand=self.detail_scrollbar.set)
+
+        self.detail_display_frame = ttk.Frame(self.detail_canvas)
+        self.detail_display_frame.bind(
+            "<Configure>",
+            lambda e: self.detail_canvas.configure(scrollregion=self.detail_canvas.bbox("all")),
+        )
+        self.detail_canvas.create_window((0, 0), window=self.detail_display_frame, anchor="nw")
+        self.detail_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.detail_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Footer Tabs
         self.footer_tabs = ttk.Notebook(self)
         self.footer_tabs.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # Add first session
+        # Sample data
+        self.orders = []
+        self.add_order("12345", "100.5", "200", "Session 1")
+        self.add_order("12345", "101.0", "150", "Session 1")
+        self.add_order("67890", "200.0", "300", "Session 2")
+
+        # Add first session tab
         self.add_session()
 
+    def add_order(self, clorid, price, quantity, session):
+        """Add an order to the display."""
+        order = {"clorid": clorid, "price": price, "quantity": quantity, "session": session}
+        self.orders.append(order)
+
+        # Add to GUI
+        order_label = ttk.Label(self.order_display_frame, text=f"{clorid}: {price} x {quantity} ({session})")
+        order_label.pack(anchor="nw", padx=5, pady=2)
+        order_label.bind("<Button-1>", lambda e, o=order: self.show_order_responses(o))
+
+    def show_order_responses(self, order):
+        """Show order and responses in the detail frame."""
+        # Clear previous details
+        for widget in self.detail_display_frame.winfo_children():
+            widget.destroy()
+
+        # Display order details
+        ttk.Label(self.detail_display_frame, text=f"Order Details for {order['clorid']}").pack(anchor="nw", padx=5, pady=5)
+        ttk.Label(self.detail_display_frame, text=f"Price: {order['price']}").pack(anchor="nw", padx=5)
+        ttk.Label(self.detail_display_frame, text=f"Quantity: {order['quantity']}").pack(anchor="nw", padx=5)
+        ttk.Label(self.detail_display_frame, text=f"Session: {order['session']}").pack(anchor="nw", padx=5)
+
+        # Mock responses
+        ttk.Label(self.detail_display_frame, text="Responses:").pack(anchor="nw", padx=5, pady=10)
+        responses = [f"Response 1 for {order['clorid']}", f"Response 2 for {order['clorid']}"]
+        for response in responses:
+            ttk.Label(self.detail_display_frame, text=response).pack(anchor="nw", padx=20)
+
     def add_session(self):
+        """Add a new session tab."""
         session_frame = ttk.Frame(self.footer_tabs)
         self.footer_tabs.add(session_frame, text=f"Session {len(self.footer_tabs.tabs()) + 1}")
 
@@ -67,26 +127,8 @@ class FixClientSimulator(tk.Tk):
         ttk.Button(scrollable_frame, text="Add Tag", command=lambda: self.add_new_tag(scrollable_frame)).pack(anchor="nw", pady=5)
 
     def add_new_tag(self, frame):
-        row = len(frame.winfo_children())
+        """Add a new FIX tag dynamically."""
         ttk.Entry(frame).pack(anchor="nw", pady=5)
-
-    def show_order_details(self, event):
-        selected_item = self.frame_a.selection()
-        if not selected_item:
-            return
-
-        order_details = self.frame_a.item(selected_item, "values")
-
-        # Create a new window for order details
-        order_window = tk.Toplevel(self)
-        order_window.title("Order Details")
-        ttk.Label(order_window, text=f"Order Details: {order_details}").pack(pady=10)
-
-        # Example response details
-        ttk.Label(order_window, text="Responses:").pack(anchor="nw", padx=10, pady=5)
-        response_list = ["Response 1", "Response 2"]
-        for response in response_list:
-            ttk.Label(order_window, text=response).pack(anchor="nw", padx=20)
 
 
 if __name__ == "__main__":
