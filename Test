@@ -1,162 +1,148 @@
 import tkinter as tk
 from tkinter import ttk
-
+from tkinter import messagebox
 
 class FixClientSimulator(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("FIX Client Simulator")
-        self.geometry("1200x800")
+        self.geometry("1000x600")
+        
+        # Initialize variables
+        self.sessions = {}  # Stores session configurations
+        self.logs = []      # Stores log messages
+        
+        # Create GUI
+        self.create_menu_bar()
+        self.create_main_layout()
 
-        # Menu bar
-        self.menu_bar = tk.Menu(self)
-        self.config(menu=self.menu_bar)
-        self.menu_bar.add_command(label="Add Session", command=self.show_add_session_form)
+    def create_menu_bar(self):
+        """Creates the menu bar."""
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
 
-        # Order Input Frame
-        self.add_order_frame = ttk.LabelFrame(self, text="Add Order")
-        self.add_order_frame.pack(fill=tk.X, padx=5, pady=5)
+        # Session menu
+        session_menu = tk.Menu(menubar, tearoff=0)
+        session_menu.add_command(label="Add Session", command=self.add_session)
+        session_menu.add_command(label="Close Session", command=self.close_session)
+        menubar.add_cascade(label="Sessions", menu=session_menu)
 
-        ttk.Label(self.add_order_frame, text="Client Order ID:").grid(row=0, column=0, padx=5, pady=5)
-        self.order_id_entry = ttk.Entry(self.add_order_frame)
-        self.order_id_entry.grid(row=0, column=1, padx=5, pady=5)
+        # Testing menu
+        test_menu = tk.Menu(menubar, tearoff=0)
+        test_menu.add_command(label="Run Test", command=self.run_test)
+        menubar.add_cascade(label="Tests", menu=test_menu)
 
-        ttk.Label(self.add_order_frame, text="Price:").grid(row=0, column=2, padx=5, pady=5)
-        self.price_entry = ttk.Entry(self.add_order_frame)
-        self.price_entry.grid(row=0, column=3, padx=5, pady=5)
+    def create_main_layout(self):
+        """Creates the main layout with frames."""
+        # Left: Sessions Panel
+        self.frame_sessions = ttk.Frame(self, padding="5")
+        self.frame_sessions.grid(row=0, column=0, sticky="nsw", padx=5, pady=5)
+        ttk.Label(self.frame_sessions, text="Sessions", font=("Arial", 12, "bold")).pack(anchor="w")
 
-        ttk.Label(self.add_order_frame, text="Quantity:").grid(row=0, column=4, padx=5, pady=5)
-        self.quantity_entry = ttk.Entry(self.add_order_frame)
-        self.quantity_entry.grid(row=0, column=5, padx=5, pady=5)
+        # Right: Logs Panel
+        self.frame_logs = ttk.Notebook(self)
+        self.frame_logs.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
 
-        ttk.Label(self.add_order_frame, text="Session Name:").grid(row=0, column=6, padx=5, pady=5)
-        self.session_entry = ttk.Entry(self.add_order_frame)
-        self.session_entry.grid(row=0, column=7, padx=5, pady=5)
+        # Bottom: Message Creation Panel
+        self.frame_message_creation = ttk.Frame(self, padding="5")
+        self.frame_message_creation.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        ttk.Label(self.frame_message_creation, text="Message Creation", font=("Arial", 12, "bold")).pack(anchor="w")
 
-        ttk.Button(self.add_order_frame, text="Add Order", command=self.add_order).grid(row=0, column=8, padx=5, pady=5)
+        # Expandable configuration
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
 
-        # Order Frame with Column Names
-        self.order_frame = ttk.LabelFrame(self, text="Orders")
-        self.order_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+    def add_session(self):
+        """Handles adding a new FIX session."""
+        session_name = f"Session {len(self.sessions) + 1}"
+        self.sessions[session_name] = {"status": "Stopped"}
+        self.update_sessions_panel()
+        messagebox.showinfo("Session Added", f"{session_name} added.")
 
-        self.order_canvas = tk.Canvas(self.order_frame)
-        self.order_scrollbar = ttk.Scrollbar(self.order_frame, orient="vertical", command=self.order_canvas.yview)
-        self.order_canvas.configure(yscrollcommand=self.order_scrollbar.set)
-
-        self.order_table_frame = ttk.Frame(self.order_canvas)
-        self.order_table_frame.bind(
-            "<Configure>",
-            lambda e: self.order_canvas.configure(scrollregion=self.order_canvas.bbox("all")),
-        )
-        self.order_canvas.create_window((0, 0), window=self.order_table_frame, anchor="nw")
-        self.order_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.order_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Add column headers
-        headers = ["Client Order ID", "Price", "Quantity", "Session Name"]
-        for col, header in enumerate(headers):
-            ttk.Label(self.order_table_frame, text=header, font=("Arial", 10, "bold")).grid(row=0, column=col, padx=5, pady=5)
-
-        self.orders = []
-        self.order_row = 1  # Track rows for adding new orders
-
-        # Detail Frame
-        self.detail_frame = ttk.LabelFrame(self, text="Order Details and Responses")
-        self.detail_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # Footer Tabs
-        self.footer_tabs = ttk.Notebook(self)
-        self.footer_tabs.pack(side=tk.BOTTOM, fill=tk.X)
-
-    def add_order(self):
-        """Add an order to the order table dynamically."""
-        clorid = self.order_id_entry.get()
-        price = self.price_entry.get()
-        quantity = self.quantity_entry.get()
-        session = self.session_entry.get()
-
-        if not clorid or not price or not quantity or not session:
-            tk.messagebox.showwarning("Missing Data", "All fields must be filled!")
+    def close_session(self):
+        """Handles closing a FIX session."""
+        if not self.sessions:
+            messagebox.showwarning("No Sessions", "No active sessions to close.")
             return
+        session_name = list(self.sessions.keys())[-1]
+        del self.sessions[session_name]
+        self.update_sessions_panel()
+        messagebox.showinfo("Session Closed", f"{session_name} closed.")
 
-        order = {"clorid": clorid, "price": price, "quantity": quantity, "session": session, "responses": []}
-        self.orders.append(order)
-
-        ttk.Label(self.order_table_frame, text=clorid).grid(row=self.order_row, column=0, padx=5, pady=5)
-        ttk.Label(self.order_table_frame, text=price).grid(row=self.order_row, column=1, padx=5, pady=5)
-        ttk.Label(self.order_table_frame, text=quantity).grid(row=self.order_row, column=2, padx=5, pady=5)
-        ttk.Label(self.order_table_frame, text=session).grid(row=self.order_row, column=3, padx=5, pady=5)
-
-        # Bind click event to show responses
-        row = self.order_row
-        for col in range(4):
-            self.order_table_frame.grid_slaves(row=row, column=col)[0].bind(
-                "<Button-1>", lambda e, o=order: self.show_order_responses(o)
-            )
-
-        self.order_row += 1
-        self.clear_order_form()
-
-    def clear_order_form(self):
-        """Clear the order input form."""
-        self.order_id_entry.delete(0, tk.END)
-        self.price_entry.delete(0, tk.END)
-        self.quantity_entry.delete(0, tk.END)
-        self.session_entry.delete(0, tk.END)
-
-    def show_order_responses(self, order):
-        """Display order responses in the detail frame."""
-        for widget in self.detail_frame.winfo_children():
+    def update_sessions_panel(self):
+        """Updates the sessions panel."""
+        for widget in self.frame_sessions.winfo_children():
             widget.destroy()
+        ttk.Label(self.frame_sessions, text="Sessions", font=("Arial", 12, "bold")).pack(anchor="w")
+        for session_name in self.sessions:
+            status = self.sessions[session_name]["status"]
+            ttk.Label(self.frame_sessions, text=f"{session_name} - {status}").pack(anchor="w")
 
-        ttk.Label(self.detail_frame, text=f"Details for Order {order['clorid']}", font=("Arial", 12, "bold")).pack(anchor="w", padx=10, pady=5)
-
-        # Mock response data for demonstration
-        ttk.Label(self.detail_frame, text="Response 1: FIX tag details").pack(anchor="w", padx=10)
-        ttk.Label(self.detail_frame, text="Response 2: FIX tag details").pack(anchor="w", padx=10)
-
-    def show_add_session_form(self):
-        """Display a form for adding a new session."""
-        form = tk.Toplevel(self)
-        form.title("Add Session")
-        form.geometry("400x300")
-
-        # Session Name
-        ttk.Label(form, text="Session Name:").pack(pady=10, anchor="w", padx=20)
-        session_name_entry = ttk.Entry(form)
-        session_name_entry.pack(padx=20, fill=tk.X)
-
-        # IP Address
-        ttk.Label(form, text="IP Address:").pack(pady=10, anchor="w", padx=20)
-        ip_entry = ttk.Entry(form)
-        ip_entry.pack(padx=20, fill=tk.X)
-
-        # Port
-        ttk.Label(form, text="Port:").pack(pady=10, anchor="w", padx=20)
-        port_entry = ttk.Entry(form)
-        port_entry.pack(padx=20, fill=tk.X)
-
-        # Add Button
-        def add_session():
-            session_name = session_name_entry.get()
-            ip = ip_entry.get()
-            port = port_entry.get()
-            if session_name and ip and port:
-                self.add_session(session_name, ip, port)
-                form.destroy()
-
-        ttk.Button(form, text="Add Session", command=add_session).pack(pady=20)
-
-    def add_session(self, session_name, ip, port):
-        """Add a new session tab."""
-        session_frame = ttk.Frame(self.footer_tabs)
-        self.footer_tabs.add(session_frame, text=session_name)
-
-        ttk.Label(session_frame, text=f"Session: {session_name}").pack(pady=10)
-        ttk.Label(session_frame, text=f"IP Address: {ip}").pack(pady=5)
-        ttk.Label(session_frame, text=f"Port: {port}").pack(pady=5)
-
+    def run_test(self):
+        """Runs a predefined test scenario."""
+        messagebox.showinfo("Run Test", "Test scenario execution started.")
 
 if __name__ == "__main__":
     app = FixClientSimulator()
     app.mainloop()
+
+class MessageCreationForm(ttk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.fields = {}
+        
+        ttk.Label(self, text="Create FIX Message", font=("Arial", 12)).pack(anchor="w", pady=5)
+        
+        # Scrollable container for dynamic fields
+        self.canvas = tk.Canvas(self)
+        self.scrollable_frame = ttk.Frame(self.canvas)
+        self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Buttons
+        ttk.Button(self, text="Add Tag", command=self.add_tag).pack(pady=5)
+        ttk.Button(self, text="Send Message", command=self.send_message).pack(pady=5)
+
+    def add_tag(self):
+        """Dynamically adds a tag entry field."""
+        tag_index = len(self.fields) + 1
+        label = ttk.Label(self.scrollable_frame, text=f"Tag {tag_index}")
+        entry = ttk.Entry(self.scrollable_frame)
+        label.grid(row=tag_index, column=0, pady=2, sticky="w")
+        entry.grid(row=tag_index, column=1, pady=2, sticky="w")
+        self.fields[tag_index] = entry
+
+    def send_message(self):
+        """Handles sending the created message."""
+        message = {tag: entry.get() for tag, entry in self.fields.items()}
+        print("Message Sent:", message)
+
+class LogViewer(ttk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        
+        self.log_text = tk.Text(self, wrap="word")
+        self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
+        
+    def add_log(self, message):
+        """Adds a log message."""
+        self.log_text.insert("end", f"{message}\n")
+        self.log_text.see("end")
+
+class TestingFramework:
+    def __init__(self):
+        self.test_cases = []
+
+    def add_test_case(self, name, scenario):
+        self.test_cases.append({"name": name, "scenario": scenario})
+
+    def execute_test_cases(self):
+        for test in self.test_cases:
+            print(f"Executing {test['name']}")
+            # Simulate workflow here
