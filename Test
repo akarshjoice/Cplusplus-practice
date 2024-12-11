@@ -63,20 +63,38 @@ class FixClientSimulator(tk.Tk):
         self.response_treeview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Frame 3 - Order Entry Fields and Send Button
-        self.frame3 = tk.Frame(self)
-        self.frame3.pack(fill=tk.X, padx=10, pady=10)
+        self.frame3_container = tk.Frame(self)
+        self.frame3_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        self.fix_fields = []  # Store references to the dynamic fields
-
-        self.add_field_button = tk.Button(
-            self.frame3, text="Add Tag", command=self.add_tag
+        self.canvas = tk.Canvas(self.frame3_container)
+        self.scrollbar = ttk.Scrollbar(
+            self.frame3_container, orient="vertical", command=self.canvas.yview
         )
-        self.add_field_button.grid(row=0, column=0, padx=5, pady=5)
+        self.scrollable_frame = ttk.Frame(self.canvas)
+
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")),
+        )
+
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+
+        # Add default fields and dynamic functionality to Frame 3
+        self.fix_fields = []
+        self.create_default_fields()
+        self.add_field_button = tk.Button(
+            self.scrollable_frame, text="Add Tag", command=self.add_tag
+        )
+        self.add_field_button.grid(row=4, column=0, padx=5, pady=5)
 
         self.send_button = tk.Button(
-            self.frame3, text="Send Order", command=self.send_order
+            self.scrollable_frame, text="Send Order", command=self.send_order
         )
-        self.send_button.grid(row=0, column=1, padx=5, pady=5)
+        self.send_button.grid(row=4, column=1, padx=5, pady=5)
 
         # Frame 4 - Message Field Display
         self.frame4 = tk.Frame(self)
@@ -88,18 +106,28 @@ class FixClientSimulator(tk.Tk):
         self.msg_details = tk.Text(self.frame4, wrap=tk.WORD, height=10)
         self.msg_details.pack(fill=tk.BOTH, expand=True)
 
+    def create_default_fields(self):
+        """Create default FIX fields in Frame 3."""
+        labels = ["Client Order ID", "Quantity", "Price"]
+        for i, label in enumerate(labels):
+            tk.Label(self.scrollable_frame, text=f"{label}:").grid(
+                row=i, column=0, padx=5, pady=5
+            )
+            entry = tk.Entry(self.scrollable_frame)
+            entry.grid(row=i, column=1, padx=5, pady=5)
+            self.fix_fields.append((label, entry))
+
     def add_tag(self):
         """Dynamically add a FIX Tag and Value input field."""
-        row = len(self.fix_fields) + 1
-
-        fix_tag_label = tk.Label(self.frame3, text=f"FIX Tag {row}:")
+        row = len(self.fix_fields)
+        fix_tag_label = tk.Label(self.scrollable_frame, text=f"FIX Tag {row}:")
         fix_tag_label.grid(row=row, column=0, padx=5, pady=5)
-        fix_tag_entry = tk.Entry(self.frame3)
+        fix_tag_entry = tk.Entry(self.scrollable_frame)
         fix_tag_entry.grid(row=row, column=1, padx=5, pady=5)
 
-        value_label = tk.Label(self.frame3, text=f"Value {row}:")
+        value_label = tk.Label(self.scrollable_frame, text=f"Value {row}:")
         value_label.grid(row=row, column=2, padx=5, pady=5)
-        value_entry = tk.Entry(self.frame3)
+        value_entry = tk.Entry(self.scrollable_frame)
         value_entry.grid(row=row, column=3, padx=5, pady=5)
 
         # Store references to these fields
@@ -109,10 +137,15 @@ class FixClientSimulator(tk.Tk):
         """Collect all entered FIX tags and values, and simulate sending an order."""
         order_data = {}
         for fix_tag_entry, value_entry in self.fix_fields:
-            fix_tag = fix_tag_entry.get()
-            value = value_entry.get()
-            if fix_tag and value:
-                order_data[fix_tag] = value
+            if isinstance(fix_tag_entry, tuple):  # Default fields
+                label, entry = fix_tag_entry
+                value = value_entry.get()
+                order_data[label] = value
+            else:  # Dynamically added fields
+                fix_tag = fix_tag_entry.get()
+                value = value_entry.get()
+                if fix_tag and value:
+                    order_data[fix_tag] = value
 
         # Display the order details in Frame 1 Treeview
         order_id = f"Order_{len(self.treeview.get_children()) + 1}"  # Simulate Order ID
@@ -123,11 +156,6 @@ class FixClientSimulator(tk.Tk):
         # Simulate a response and add it to Frame 2 (response details)
         message_type = f"Response for {order_id}"  # Simulate response message
         self.response_treeview.insert("", "end", values=(message_type))
-
-        # Clear the dynamic fields after sending
-        for fix_tag_entry, value_entry in self.fix_fields:
-            fix_tag_entry.delete(0, tk.END)
-            value_entry.delete(0, tk.END)
 
         # Log the sent order data
         print(f"Order Sent: {order_data}")
