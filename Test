@@ -1,155 +1,112 @@
 import tkinter as tk
 from tkinter import ttk
-from tkinter import messagebox
 
 class FixClientSimulator(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("FIX Client Simulator")
-        self.geometry("1000x600")
+        self.geometry("800x600")
         
-        # Initialize variables
-        self.sessions = {}  # Stores session configurations
-        self.logs = []      # Stores log messages
-        
-        # Initialize testing framework
-        self.testing_framework = TestingFramework()
+        # Menu bar with Connect option
+        self.create_menu()
 
-        # Create GUI
-        self.create_menu_bar()
-        self.create_main_layout()
+        # Main content - 4 frames
+        self.create_frames()
 
-    def create_menu_bar(self):
-        """Creates the menu bar."""
+    def create_menu(self):
         menubar = tk.Menu(self)
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Connect", command=self.connect)
+        menubar.add_cascade(label="File", menu=file_menu)
         self.config(menu=menubar)
 
-        # Session menu
-        session_menu = tk.Menu(menubar, tearoff=0)
-        session_menu.add_command(label="Add Session", command=self.add_session)
-        session_menu.add_command(label="Close Session", command=self.close_session)
-        menubar.add_cascade(label="Sessions", menu=session_menu)
+    def connect(self):
+        # Placeholder for connect functionality
+        print("Connecting to FIX server...")
 
-        # Testing menu
-        test_menu = tk.Menu(menubar, tearoff=0)
-        test_menu.add_command(label="Run Test", command=self.run_test)
-        menubar.add_cascade(label="Tests", menu=test_menu)
+    def create_frames(self):
+        # Frame 1 - Order Sent Details (Treeview)
+        self.frame1 = tk.Frame(self)
+        self.frame1.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-    def create_main_layout(self):
-        """Creates the main layout with frames."""
-        # Left: Sessions Panel
-        self.frame_sessions = ttk.Frame(self, padding="5")
-        self.frame_sessions.grid(row=0, column=0, sticky="nsw", padx=5, pady=5)
-        ttk.Label(self.frame_sessions, text="Sessions", font=("Arial", 12, "bold")).pack(anchor="w")
+        self.treeview = ttk.Treeview(self.frame1, columns=("Order ID", "Quantity", "Price"), show="headings")
+        self.treeview.heading("Order ID", text="Client Order ID")
+        self.treeview.heading("Quantity", text="Quantity")
+        self.treeview.heading("Price", text="Price")
+        self.treeview.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
 
-        # Right: Logs Panel
-        self.frame_logs = ttk.Notebook(self)
-        self.frame_logs.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
-        self.log_viewer = LogViewer(self.frame_logs)
-        self.frame_logs.add(self.log_viewer, text="Logs")
+        # Scrollbar for Treeview
+        self.treeview_scroll = tk.Scrollbar(self.frame1, orient=tk.VERTICAL, command=self.treeview.yview)
+        self.treeview.config(yscrollcommand=self.treeview_scroll.set)
+        self.treeview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Bottom: Message Creation Panel
-        self.frame_message_creation = MessageCreationForm(self)
-        self.frame_message_creation.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        # Frame 2 - Responses for Orders (Treeview)
+        self.frame2 = tk.Frame(self)
+        self.frame2.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Expandable configuration
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
+        self.response_treeview = ttk.Treeview(self.frame2, columns=("Message Type"), show="headings")
+        self.response_treeview.heading("Message Type", text="Message Type")
+        self.response_treeview.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
 
-    def add_session(self):
-        """Handles adding a new FIX session."""
-        session_name = f"Session {len(self.sessions) + 1}"
-        self.sessions[session_name] = {"status": "Stopped"}
-        self.update_sessions_panel()
-        messagebox.showinfo("Session Added", f"{session_name} added.")
+        # Scrollbar for Responses
+        self.response_treeview_scroll = tk.Scrollbar(self.frame2, orient=tk.VERTICAL, command=self.response_treeview.yview)
+        self.response_treeview.config(yscrollcommand=self.response_treeview_scroll.set)
+        self.response_treeview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-    def close_session(self):
-        """Handles closing a FIX session."""
-        if not self.sessions:
-            messagebox.showwarning("No Sessions", "No active sessions to close.")
-            return
-        session_name = list(self.sessions.keys())[-1]
-        del self.sessions[session_name]
-        self.update_sessions_panel()
-        messagebox.showinfo("Session Closed", f"{session_name} closed.")
+        # Frame 3 - Order Entry Fields and Send Button
+        self.frame3 = tk.Frame(self)
+        self.frame3.pack(fill=tk.X, padx=10, pady=10)
 
-    def update_sessions_panel(self):
-        """Updates the sessions panel."""
-        for widget in self.frame_sessions.winfo_children():
-            widget.destroy()
-        ttk.Label(self.frame_sessions, text="Sessions", font=("Arial", 12, "bold")).pack(anchor="w")
-        for session_name in self.sessions:
-            status = self.sessions[session_name]["status"]
-            ttk.Label(self.frame_sessions, text=f"{session_name} - {status}").pack(anchor="w")
+        # Labels and Entry Fields for FIX tag and values
+        self.fix_tag_label = tk.Label(self.frame3, text="FIX Tag:")
+        self.fix_tag_label.grid(row=0, column=0, padx=5, pady=5)
+        self.fix_tag_entry = tk.Entry(self.frame3)
+        self.fix_tag_entry.grid(row=0, column=1, padx=5, pady=5)
 
-    def run_test(self):
-        """Runs a predefined test scenario."""
-        self.testing_framework.execute_test_cases()
-        messagebox.showinfo("Run Test", "Test scenario execution completed.")
+        self.value_label = tk.Label(self.frame3, text="Value:")
+        self.value_label.grid(row=1, column=0, padx=5, pady=5)
+        self.value_entry = tk.Entry(self.frame3)
+        self.value_entry.grid(row=1, column=1, padx=5, pady=5)
 
-class MessageCreationForm(ttk.Frame):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.fields = {}
-        
-        ttk.Label(self, text="Create FIX Message", font=("Arial", 12)).pack(anchor="w", pady=5)
-        
-        # Scrollable container for dynamic fields
-        self.canvas = tk.Canvas(self)
-        self.scrollable_frame = ttk.Frame(self.canvas)
-        self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.send_button = tk.Button(self.frame3, text="Send Order", command=self.send_order)
+        self.send_button.grid(row=2, columnspan=2, pady=10)
 
-        scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=scrollbar.set)
+        # Frame 4 - Message Field Display
+        self.frame4 = tk.Frame(self)
+        self.frame4.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        self.msg_display_label = tk.Label(self.frame4, text="Message Details:")
+        self.msg_display_label.pack()
 
-        # Buttons
-        ttk.Button(self, text="Add Tag", command=self.add_tag).pack(pady=5)
-        ttk.Button(self, text="Send Message", command=self.send_message).pack(pady=5)
+        self.msg_details = tk.Text(self.frame4, wrap=tk.WORD, height=10)
+        self.msg_details.pack(fill=tk.BOTH, expand=True)
 
-    def add_tag(self):
-        """Dynamically adds a tag entry field."""
-        tag_index = len(self.fields) + 1
-        label = ttk.Label(self.scrollable_frame, text=f"Tag {tag_index}")
-        entry = ttk.Entry(self.scrollable_frame)
-        label.grid(row=tag_index, column=0, pady=2, sticky="w")
-        entry.grid(row=tag_index, column=1, pady=2, sticky="w")
-        self.fields[tag_index] = entry
+    def send_order(self):
+        # Get values from entry fields
+        fix_tag = self.fix_tag_entry.get()
+        value = self.value_entry.get()
 
-    def send_message(self):
-        """Handles sending the created message."""
-        message = {tag: entry.get() for tag, entry in self.fields.items()}
-        print("Message Sent:", message)
-        self.master.log_viewer.add_log(f"Message Sent: {message}")
+        # Add the order to Frame 1 Treeview (order sent details)
+        order_id = f"Order_{len(self.treeview.get_children()) + 1}"  # Simulate Order ID
+        quantity = "100"  # Default quantity
+        price = "50.00"  # Default price
+        self.treeview.insert("", "end", values=(order_id, quantity, price))
 
-class LogViewer(ttk.Frame):
-    def __init__(self, parent):
-        super().__init__(parent)
-        
-        self.log_text = tk.Text(self, wrap="word")
-        self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
-        
-    def add_log(self, message):
-        """Adds a log message."""
-        self.log_text.insert("end", f"{message}\n")
-        self.log_text.see("end")
+        # Simulate a response and add it to Frame 2 (response details)
+        message_type = f"Response for {order_id}"  # Simulate response message
+        self.response_treeview.insert("", "end", values=(message_type))
 
-class TestingFramework:
-    def __init__(self):
-        self.test_cases = []
+        # Clear the entry fields
+        self.fix_tag_entry.delete(0, tk.END)
+        self.value_entry.delete(0, tk.END)
 
-    def add_test_case(self, name, scenario):
-        self.test_cases.append({"name": name, "scenario": scenario})
+    def on_response_click(self, event):
+        selected_item = self.response_treeview.selection()[0]
+        message_type = self.response_treeview.item(selected_item, "values")[0]
+        self.msg_details.delete(1.0, tk.END)
+        self.msg_details.insert(tk.END, f"Message Type: {message_type}\nDetails: {message_type} details go here.")
 
-    def execute_test_cases(self):
-        for test in self.test_cases:
-            print(f"Executing {test['name']}")
-            # Simulate workflow here
-            messagebox.showinfo("Test Execution", f"Test case {test['name']} executed.")
-
+# Running the application
 if __name__ == "__main__":
     app = FixClientSimulator()
     app.mainloop()
