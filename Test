@@ -6,7 +6,7 @@ class FixClientSimulator(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("FIX Client Simulator")
-        self.geometry("1000x700")  # Adjusted for vertical layout
+        self.geometry("1000x700")  # Adjust the default size
 
         # Menu bar with Connect option
         self.create_menu()
@@ -22,25 +22,24 @@ class FixClientSimulator(tk.Tk):
         self.config(menu=menubar)
 
     def connect(self):
-        # Placeholder for connect functionality
         print("Connecting to FIX server...")
 
     def create_sections(self):
-        # Configure main grid
-        self.columnconfigure(0, weight=1)  # Section 1 (left) resizable
-        self.columnconfigure(1, weight=1)  # Section 2 (right) resizable
-        self.rowconfigure(0, weight=1)     # Vertical stretch
+        # Configure grid layout for the root window
+        self.rowconfigure(0, weight=3)  # Section 1 (Top) takes more space
+        self.rowconfigure(1, weight=1)  # Section 2 (Bottom) is also resizable
+        self.columnconfigure(0, weight=1)  # Single column layout for both sections
 
-        # Section 1 (Left): Contains Frame 1, Frame 2, and Frame 3
+        # Section 1 (Top) - Contains Frame 1, Frame 2, Frame 3 (horizontally arranged)
         section1 = tk.Frame(self, relief=tk.SUNKEN, borderwidth=1)
         section1.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
-        # Configure Section 1 to stretch frames vertically
-        section1.rowconfigure(0, weight=1)  # Frame 1 stretchable
-        section1.rowconfigure(1, weight=1)  # Frame 2 stretchable
-        section1.rowconfigure(2, weight=1)  # Frame 3 stretchable
+        # Configure horizontal layout within Section 1
+        section1.columnconfigure(0, weight=1)
+        section1.columnconfigure(1, weight=1)
+        section1.columnconfigure(2, weight=1)
 
-        # Frame 1 - Order Sent Details (Treeview)
+        # Frame 1 - Order Sent Details
         self.frame1 = tk.Frame(section1, relief=tk.SUNKEN, borderwidth=1)
         self.frame1.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
@@ -59,9 +58,9 @@ class FixClientSimulator(tk.Tk):
         self.treeview.config(yscrollcommand=self.treeview_scroll.set)
         self.treeview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Frame 2 - Responses for Orders (Treeview)
+        # Frame 2 - Responses for Orders
         self.frame2 = tk.Frame(section1, relief=tk.SUNKEN, borderwidth=1)
-        self.frame2.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        self.frame2.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
 
         self.response_treeview = ttk.Treeview(
             self.frame2, columns=("Message Type"), show="headings"
@@ -76,9 +75,9 @@ class FixClientSimulator(tk.Tk):
         self.response_treeview.config(yscrollcommand=self.response_treeview_scroll.set)
         self.response_treeview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Frame 3 - Order Entry Fields and Send Button
+        # Frame 3 - Scrollable Order Entry Fields
         self.frame3_container = tk.Frame(section1, relief=tk.SUNKEN, borderwidth=1)
-        self.frame3_container.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
+        self.frame3_container.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
 
         self.canvas = tk.Canvas(self.frame3_container)
         self.scrollbar = ttk.Scrollbar(
@@ -97,85 +96,38 @@ class FixClientSimulator(tk.Tk):
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        # Add default fields and dynamic functionality to Frame 3
-        self.fix_fields = []
-        self.create_default_fields()
+        self.add_default_fields()
         self.add_field_button = tk.Button(
-            self.scrollable_frame, text="Add Tag", command=self.add_tag
+            self.scrollable_frame, text="Add Field", command=self.add_field
         )
-        self.add_field_button.grid(row=4, column=0, padx=5, pady=5)
+        self.add_field_button.grid(row=3, column=0, padx=5, pady=5)
 
-        self.send_button = tk.Button(
-            self.scrollable_frame, text="Send Order", command=self.send_order
-        )
-        self.send_button.grid(row=4, column=1, padx=5, pady=5)
-
-        # Section 2 (Right): Frame 4
+        # Section 2 (Bottom) - Message Details
         section2 = tk.Frame(self, relief=tk.SUNKEN, borderwidth=1)
-        section2.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        section2.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
 
-        self.frame4 = tk.Frame(section2, relief=tk.SUNKEN, borderwidth=1)
-        self.frame4.pack(fill=tk.BOTH, expand=True)
-
-        self.msg_display_label = tk.Label(self.frame4, text="Message Details:")
+        self.msg_display_label = tk.Label(section2, text="Message Details:")
         self.msg_display_label.pack()
 
-        self.msg_details = tk.Text(self.frame4, wrap=tk.WORD, height=10)
+        self.msg_details = tk.Text(section2, wrap=tk.WORD)
         self.msg_details.pack(fill=tk.BOTH, expand=True)
 
-    def create_default_fields(self):
-        """Create default FIX fields in Frame 3."""
-        labels = ["Client Order ID", "Quantity", "Price"]
-        for i, label in enumerate(labels):
+    def add_default_fields(self):
+        """Add default FIX fields."""
+        default_labels = ["Client Order ID", "Quantity", "Price"]
+        for i, label in enumerate(default_labels):
             tk.Label(self.scrollable_frame, text=f"{label}:").grid(
                 row=i, column=0, padx=5, pady=5
             )
-            entry = tk.Entry(self.scrollable_frame)
-            entry.grid(row=i, column=1, padx=5, pady=5)
-            self.fix_fields.append((label, entry))
+            tk.Entry(self.scrollable_frame).grid(row=i, column=1, padx=5, pady=5)
 
-    def add_tag(self):
-        """Dynamically add a FIX Tag and Value input field."""
-        row = len(self.fix_fields)
-        fix_tag_label = tk.Label(self.scrollable_frame, text=f"FIX Tag {row}:")
-        fix_tag_label.grid(row=row, column=0, padx=5, pady=5)
-        fix_tag_entry = tk.Entry(self.scrollable_frame)
-        fix_tag_entry.grid(row=row, column=1, padx=5, pady=5)
-
-        value_label = tk.Label(self.scrollable_frame, text=f"Value {row}:")
-        value_label.grid(row=row, column=2, padx=5, pady=5)
-        value_entry = tk.Entry(self.scrollable_frame)
-        value_entry.grid(row=row, column=3, padx=5, pady=5)
-
-        # Store references to these fields
-        self.fix_fields.append((fix_tag_entry, value_entry))
-
-    def send_order(self):
-        """Collect all entered FIX tags and values, and simulate sending an order."""
-        order_data = {}
-        for fix_tag_entry, value_entry in self.fix_fields:
-            if isinstance(fix_tag_entry, tuple):  # Default fields
-                label, entry = fix_tag_entry
-                value = value_entry.get()
-                order_data[label] = value
-            else:  # Dynamically added fields
-                fix_tag = fix_tag_entry.get()
-                value = value_entry.get()
-                if fix_tag and value:
-                    order_data[fix_tag] = value
-
-        # Display the order details in Frame 1 Treeview
-        order_id = f"Order_{len(self.treeview.get_children()) + 1}"  # Simulate Order ID
-        quantity = "100"  # Default quantity
-        price = "50.00"  # Default price
-        self.treeview.insert("", "end", values=(order_id, quantity, price))
-
-        # Simulate a response and add it to Frame 2 (response details)
-        message_type = f"Response for {order_id}"  # Simulate response message
-        self.response_treeview.insert("", "end", values=(message_type))
-
-        # Log the sent order data
-        print(f"Order Sent: {order_data}")
+    def add_field(self):
+        """Add new FIX field dynamically."""
+        row = len(self.scrollable_frame.winfo_children()) // 2
+        tk.Label(self.scrollable_frame, text=f"Field {row}:").grid(
+            row=row, column=0, padx=5, pady=5
+        )
+        tk.Entry(self.scrollable_frame).grid(row=row, column=1, padx=5, pady=5)
 
 
 # Running the application
