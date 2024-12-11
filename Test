@@ -6,12 +6,12 @@ class FixClientSimulator(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("FIX Client Simulator")
-        self.geometry("800x600")
+        self.geometry("1000x600")  # Adjusted width to fit all frames side by side
 
         # Menu bar with Connect option
         self.create_menu()
 
-        # Main content - 4 frames
+        # Main layout: All frames side by side
         self.create_frames()
 
     def create_menu(self):
@@ -26,9 +26,13 @@ class FixClientSimulator(tk.Tk):
         print("Connecting to FIX server...")
 
     def create_frames(self):
+        # Container for all frames
+        self.main_container = tk.Frame(self)
+        self.main_container.pack(fill=tk.BOTH, expand=True)
+
         # Frame 1 - Order Sent Details (Treeview)
-        self.frame1 = tk.Frame(self)
-        self.frame1.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.frame1 = tk.Frame(self.main_container, relief=tk.SUNKEN, borderwidth=1)
+        self.frame1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.treeview = ttk.Treeview(
             self.frame1, columns=("Order ID", "Quantity", "Price"), show="headings"
@@ -46,8 +50,8 @@ class FixClientSimulator(tk.Tk):
         self.treeview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Frame 2 - Responses for Orders (Treeview)
-        self.frame2 = tk.Frame(self)
-        self.frame2.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.frame2 = tk.Frame(self.main_container, relief=tk.SUNKEN, borderwidth=1)
+        self.frame2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.response_treeview = ttk.Treeview(
             self.frame2, columns=("Message Type"), show="headings"
@@ -63,8 +67,8 @@ class FixClientSimulator(tk.Tk):
         self.response_treeview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Frame 3 - Order Entry Fields and Send Button
-        self.frame3_container = tk.Frame(self)
-        self.frame3_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.frame3_container = tk.Frame(self.main_container, relief=tk.SUNKEN, borderwidth=1)
+        self.frame3_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.canvas = tk.Canvas(self.frame3_container)
         self.scrollbar = ttk.Scrollbar(
@@ -97,8 +101,8 @@ class FixClientSimulator(tk.Tk):
         self.send_button.grid(row=4, column=1, padx=5, pady=5)
 
         # Frame 4 - Message Field Display
-        self.frame4 = tk.Frame(self)
-        self.frame4.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.frame4 = tk.Frame(self.main_container, relief=tk.SUNKEN, borderwidth=1)
+        self.frame4.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.msg_display_label = tk.Label(self.frame4, text="Message Details:")
         self.msg_display_label.pack()
