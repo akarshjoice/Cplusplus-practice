@@ -6,12 +6,12 @@ class FixClientSimulator(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("FIX Client Simulator")
-        self.geometry("1000x700")  # Adjust height to accommodate both sections
+        self.geometry("1000x700")  # Adjusted for vertical layout
 
         # Menu bar with Connect option
         self.create_menu()
 
-        # Main layout: Two sections
+        # Main layout: Two vertical sections
         self.create_sections()
 
     def create_menu(self):
@@ -26,13 +26,17 @@ class FixClientSimulator(tk.Tk):
         print("Connecting to FIX server...")
 
     def create_sections(self):
-        # Section 1 - Frames 1, 2, and 3 horizontally parallel
-        section1 = tk.Frame(self)
-        section1.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Main container for left and right sections
+        main_container = tk.Frame(self)
+        main_container.pack(fill=tk.BOTH, expand=True)
+
+        # Section 1 (Left): Contains Frame 1, Frame 2, and Frame 3
+        section1 = tk.Frame(main_container, relief=tk.SUNKEN, borderwidth=1)
+        section1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Frame 1 - Order Sent Details (Treeview)
         self.frame1 = tk.Frame(section1, relief=tk.SUNKEN, borderwidth=1)
-        self.frame1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.frame1.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.treeview = ttk.Treeview(
             self.frame1, columns=("Order ID", "Quantity", "Price"), show="headings"
@@ -51,7 +55,7 @@ class FixClientSimulator(tk.Tk):
 
         # Frame 2 - Responses for Orders (Treeview)
         self.frame2 = tk.Frame(section1, relief=tk.SUNKEN, borderwidth=1)
-        self.frame2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.frame2.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.response_treeview = ttk.Treeview(
             self.frame2, columns=("Message Type"), show="headings"
@@ -68,7 +72,7 @@ class FixClientSimulator(tk.Tk):
 
         # Frame 3 - Order Entry Fields and Send Button
         self.frame3_container = tk.Frame(section1, relief=tk.SUNKEN, borderwidth=1)
-        self.frame3_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.frame3_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.canvas = tk.Canvas(self.frame3_container)
         self.scrollbar = ttk.Scrollbar(
@@ -100,9 +104,9 @@ class FixClientSimulator(tk.Tk):
         )
         self.send_button.grid(row=4, column=1, padx=5, pady=5)
 
-        # Section 2 - Frame 4
-        section2 = tk.Frame(self)
-        section2.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Section 2 (Right): Frame 4
+        section2 = tk.Frame(main_container, relief=tk.SUNKEN, borderwidth=1)
+        section2.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.frame4 = tk.Frame(section2, relief=tk.SUNKEN, borderwidth=1)
         self.frame4.pack(fill=tk.BOTH, expand=True)
