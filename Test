@@ -6,7 +6,7 @@ class FixClientSimulator(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("FIX Client Simulator")
-        self.geometry("1000x700")  # Adjust the default size
+        self.geometry("1000x700")  # Adjusted for vertical layout
 
         # Menu bar with Connect option
         self.create_menu()
@@ -22,67 +22,70 @@ class FixClientSimulator(tk.Tk):
         self.config(menu=menubar)
 
     def connect(self):
+        # Placeholder for connect functionality
         print("Connecting to FIX server...")
 
     def create_sections(self):
-        # Configure grid layout for the root window
-        self.rowconfigure(0, weight=3)  # Section 1 (Top) takes more space
-        self.rowconfigure(1, weight=1)  # Section 2 (Bottom) is also resizable
-        self.columnconfigure(0, weight=1)  # Single column layout for both sections
+        # Main container for left and right sections
+        main_container = tk.Frame(self)
+        main_container.pack(fill=tk.BOTH, expand=True)
 
-        # Section 1 (Top) - Contains Frame 1, Frame 2, Frame 3 (horizontally arranged)
-        section1 = tk.Frame(self, relief=tk.SUNKEN, borderwidth=1)
-        section1.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        # Section 1 (Left): Contains Frame 1, Frame 2, and Frame 3
+        section1 = tk.Frame(main_container, relief=tk.SUNKEN, borderwidth=1)
+        section1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Configure horizontal layout within Section 1
-        section1.columnconfigure(0, weight=1)
-        section1.columnconfigure(1, weight=1)
-        section1.columnconfigure(2, weight=1)
-
-        # Frame 1 - Order Sent Details
+        # Frame 1 - Order Sent Details (Treeview)
         self.frame1 = tk.Frame(section1, relief=tk.SUNKEN, borderwidth=1)
-        self.frame1.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self.frame1.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        self.treeview = ttk.Treeview(
-            self.frame1, columns=("Order ID", "Quantity", "Price"), show="headings"
-        )
+        # Canvas for scrolling in Frame 1 (both horizontal and vertical)
+        self.canvas1 = tk.Canvas(self.frame1)
+        self.scrollbar1_y = ttk.Scrollbar(self.frame1, orient="vertical", command=self.canvas1.yview)
+        self.scrollbar1_x = ttk.Scrollbar(self.frame1, orient="horizontal", command=self.canvas1.xview)
+        self.treeview_frame1 = ttk.Frame(self.canvas1)
+
+        # Add Treeview in the scrollable frame
+        self.treeview = ttk.Treeview(self.treeview_frame1, columns=("Order ID", "Quantity", "Price"), show="headings")
         self.treeview.heading("Order ID", text="Client Order ID")
         self.treeview.heading("Quantity", text="Quantity")
         self.treeview.heading("Price", text="Price")
-        self.treeview.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        self.treeview.pack(fill=tk.BOTH, expand=True)
 
-        # Scrollbar for Treeview
-        self.treeview_scroll = tk.Scrollbar(
-            self.frame1, orient=tk.VERTICAL, command=self.treeview.yview
-        )
-        self.treeview.config(yscrollcommand=self.treeview_scroll.set)
-        self.treeview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        # Configure canvas with scrollbars
+        self.canvas1.create_window((0, 0), window=self.treeview_frame1, anchor="nw")
+        self.canvas1.config(yscrollcommand=self.scrollbar1_y.set, xscrollcommand=self.scrollbar1_x.set)
+        self.canvas1.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        self.scrollbar1_y.pack(side=tk.RIGHT, fill=tk.Y)
+        self.scrollbar1_x.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # Frame 2 - Responses for Orders
+        # Frame 2 - Responses for Orders (Treeview)
         self.frame2 = tk.Frame(section1, relief=tk.SUNKEN, borderwidth=1)
-        self.frame2.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        self.frame2.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        self.response_treeview = ttk.Treeview(
-            self.frame2, columns=("Message Type"), show="headings"
-        )
+        # Canvas for scrolling in Frame 2 (both horizontal and vertical)
+        self.canvas2 = tk.Canvas(self.frame2)
+        self.scrollbar2_y = ttk.Scrollbar(self.frame2, orient="vertical", command=self.canvas2.yview)
+        self.scrollbar2_x = ttk.Scrollbar(self.frame2, orient="horizontal", command=self.canvas2.xview)
+        self.treeview_frame2 = ttk.Frame(self.canvas2)
+
+        # Add Treeview in the scrollable frame
+        self.response_treeview = ttk.Treeview(self.treeview_frame2, columns=("Message Type"), show="headings")
         self.response_treeview.heading("Message Type", text="Message Type")
-        self.response_treeview.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        self.response_treeview.pack(fill=tk.BOTH, expand=True)
 
-        # Scrollbar for Responses
-        self.response_treeview_scroll = tk.Scrollbar(
-            self.frame2, orient=tk.VERTICAL, command=self.response_treeview.yview
-        )
-        self.response_treeview.config(yscrollcommand=self.response_treeview_scroll.set)
-        self.response_treeview_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        # Configure canvas with scrollbars
+        self.canvas2.create_window((0, 0), window=self.treeview_frame2, anchor="nw")
+        self.canvas2.config(yscrollcommand=self.scrollbar2_y.set, xscrollcommand=self.scrollbar2_x.set)
+        self.canvas2.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        self.scrollbar2_y.pack(side=tk.RIGHT, fill=tk.Y)
+        self.scrollbar2_x.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # Frame 3 - Scrollable Order Entry Fields
+        # Frame 3 - Order Entry Fields and Send Button
         self.frame3_container = tk.Frame(section1, relief=tk.SUNKEN, borderwidth=1)
-        self.frame3_container.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
+        self.frame3_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.canvas = tk.Canvas(self.frame3_container)
-        self.scrollbar = ttk.Scrollbar(
-            self.frame3_container, orient="vertical", command=self.canvas.yview
-        )
+        self.scrollbar = ttk.Scrollbar(self.frame3_container, orient="vertical", command=self.canvas.yview)
         self.scrollable_frame = ttk.Frame(self.canvas)
 
         self.scrollable_frame.bind(
@@ -96,38 +99,93 @@ class FixClientSimulator(tk.Tk):
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        self.add_default_fields()
+        # Add default fields and dynamic functionality to Frame 3
+        self.fix_fields = []
+        self.create_default_fields()
         self.add_field_button = tk.Button(
-            self.scrollable_frame, text="Add Field", command=self.add_field
+            self.scrollable_frame, text="Add Tag", command=self.add_tag
         )
-        self.add_field_button.grid(row=3, column=0, padx=5, pady=5)
+        self.add_field_button.grid(row=4, column=0, padx=5, pady=5)
 
-        # Section 2 (Bottom) - Message Details
-        section2 = tk.Frame(self, relief=tk.SUNKEN, borderwidth=1)
-        section2.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        self.send_button = tk.Button(
+            self.scrollable_frame, text="Send Order", command=self.send_order
+        )
+        self.send_button.grid(row=4, column=1, padx=5, pady=5)
 
-        self.msg_display_label = tk.Label(section2, text="Message Details:")
+        # Section 2 (Right): Frame 4
+        section2 = tk.Frame(main_container, relief=tk.SUNKEN, borderwidth=1)
+        section2.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.frame4 = tk.Frame(section2, relief=tk.SUNKEN, borderwidth=1)
+        self.frame4.pack(fill=tk.BOTH, expand=True)
+
+        self.msg_display_label = tk.Label(self.frame4, text="Message Details:")
         self.msg_display_label.pack()
 
-        self.msg_details = tk.Text(section2, wrap=tk.WORD)
+        self.msg_details = tk.Text(self.frame4, wrap=tk.WORD, height=10)
         self.msg_details.pack(fill=tk.BOTH, expand=True)
 
-    def add_default_fields(self):
-        """Add default FIX fields."""
-        default_labels = ["Client Order ID", "Quantity", "Price"]
-        for i, label in enumerate(default_labels):
+    def create_default_fields(self):
+        """Create default FIX fields in Frame 3."""
+        labels = ["Client Order ID", "Quantity", "Price"]
+        for i, label in enumerate(labels):
             tk.Label(self.scrollable_frame, text=f"{label}:").grid(
                 row=i, column=0, padx=5, pady=5
             )
-            tk.Entry(self.scrollable_frame).grid(row=i, column=1, padx=5, pady=5)
+            entry = tk.Entry(self.scrollable_frame)
+            entry.grid(row=i, column=1, padx=5, pady=5)
+            self.fix_fields.append((label, entry))
 
-    def add_field(self):
-        """Add new FIX field dynamically."""
-        row = len(self.scrollable_frame.winfo_children()) // 2
-        tk.Label(self.scrollable_frame, text=f"Field {row}:").grid(
-            row=row, column=0, padx=5, pady=5
+    def add_tag(self):
+        """Dynamically add a FIX Tag and Value input field."""
+        row = len(self.fix_fields)
+        fix_tag_label = tk.Label(self.scrollable_frame, text=f"FIX Tag {row}:")
+        fix_tag_label.grid(row=row, column=0, padx=5, pady=5)
+        fix_tag_entry = tk.Entry(self.scrollable_frame)
+        fix_tag_entry.grid(row=row, column=1, padx=5, pady=5)
+
+        value_label = tk.Label(self.scrollable_frame, text=f"Value {row}:")
+        value_label.grid(row=row, column=2, padx=5, pady=5)
+        value_entry = tk.Entry(self.scrollable_frame)
+        value_entry.grid(row=row, column=3, padx=5, pady=5)
+
+        # Store references to these fields
+        self.fix_fields.append((fix_tag_entry, value_entry))
+
+    def send_order(self):
+        """Collect all entered FIX tags and values, and simulate sending an order."""
+        order_data = {}
+        for fix_tag_entry, value_entry in self.fix_fields:
+            if isinstance(fix_tag_entry, tuple):  # Default fields
+                label, entry = fix_tag_entry
+                value = value_entry.get()
+                order_data[label] = value
+            else:  # Dynamically added fields
+                fix_tag = fix_tag_entry.get()
+                value = value_entry.get()
+                if fix_tag and value:
+                    order_data[fix_tag] = value
+
+        # Display the order details in Frame 1 Treeview
+        order_id = f"Order_{len(self.treeview.get_children()) + 1}"  # Simulate Order ID
+        quantity = "100"  # Default quantity
+        price = "50.00"  # Default price
+        self.treeview.insert("", "end", values=(order_id, quantity, price))
+
+        # Simulate a response and add it to Frame 2 (response details)
+        message_type = f"Response for {order_id}"  # Simulate response message
+        self.response_treeview.insert("", "end", values=(message_type))
+
+        # Log the sent order data
+        print(f"Order Sent: {order_data}")
+
+    def on_response_click(self, event):
+        selected_item = self.response_treeview.selection()[0]
+        message_type = self.response_treeview.item(selected_item, "values")[0]
+        self.msg_details.delete(1.0, tk.END)
+        self.msg_details.insert(
+            tk.END, f"Message Type: {message_type}\nDetails: {message_type} details go here."
         )
-        tk.Entry(self.scrollable_frame).grid(row=row, column=1, padx=5, pady=5)
 
 
 # Running the application
