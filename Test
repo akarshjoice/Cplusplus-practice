@@ -26,17 +26,23 @@ class FixClientSimulator(tk.Tk):
         print("Connecting to FIX server...")
 
     def create_sections(self):
-        # Main container for left and right sections
-        main_container = tk.Frame(self)
-        main_container.pack(fill=tk.BOTH, expand=True)
+        # Configure main grid
+        self.columnconfigure(0, weight=1)  # Section 1 (left) resizable
+        self.columnconfigure(1, weight=1)  # Section 2 (right) resizable
+        self.rowconfigure(0, weight=1)     # Vertical stretch
 
         # Section 1 (Left): Contains Frame 1, Frame 2, and Frame 3
-        section1 = tk.Frame(main_container, relief=tk.SUNKEN, borderwidth=1)
-        section1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        section1 = tk.Frame(self, relief=tk.SUNKEN, borderwidth=1)
+        section1.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        # Configure Section 1 to stretch frames vertically
+        section1.rowconfigure(0, weight=1)  # Frame 1 stretchable
+        section1.rowconfigure(1, weight=1)  # Frame 2 stretchable
+        section1.rowconfigure(2, weight=1)  # Frame 3 stretchable
 
         # Frame 1 - Order Sent Details (Treeview)
         self.frame1 = tk.Frame(section1, relief=tk.SUNKEN, borderwidth=1)
-        self.frame1.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.frame1.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
         self.treeview = ttk.Treeview(
             self.frame1, columns=("Order ID", "Quantity", "Price"), show="headings"
@@ -55,7 +61,7 @@ class FixClientSimulator(tk.Tk):
 
         # Frame 2 - Responses for Orders (Treeview)
         self.frame2 = tk.Frame(section1, relief=tk.SUNKEN, borderwidth=1)
-        self.frame2.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.frame2.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
 
         self.response_treeview = ttk.Treeview(
             self.frame2, columns=("Message Type"), show="headings"
@@ -72,7 +78,7 @@ class FixClientSimulator(tk.Tk):
 
         # Frame 3 - Order Entry Fields and Send Button
         self.frame3_container = tk.Frame(section1, relief=tk.SUNKEN, borderwidth=1)
-        self.frame3_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.frame3_container.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
 
         self.canvas = tk.Canvas(self.frame3_container)
         self.scrollbar = ttk.Scrollbar(
@@ -105,8 +111,8 @@ class FixClientSimulator(tk.Tk):
         self.send_button.grid(row=4, column=1, padx=5, pady=5)
 
         # Section 2 (Right): Frame 4
-        section2 = tk.Frame(main_container, relief=tk.SUNKEN, borderwidth=1)
-        section2.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        section2 = tk.Frame(self, relief=tk.SUNKEN, borderwidth=1)
+        section2.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
 
         self.frame4 = tk.Frame(section2, relief=tk.SUNKEN, borderwidth=1)
         self.frame4.pack(fill=tk.BOTH, expand=True)
@@ -170,14 +176,6 @@ class FixClientSimulator(tk.Tk):
 
         # Log the sent order data
         print(f"Order Sent: {order_data}")
-
-    def on_response_click(self, event):
-        selected_item = self.response_treeview.selection()[0]
-        message_type = self.response_treeview.item(selected_item, "values")[0]
-        self.msg_details.delete(1.0, tk.END)
-        self.msg_details.insert(
-            tk.END, f"Message Type: {message_type}\nDetails: {message_type} details go here."
-        )
 
 
 # Running the application
