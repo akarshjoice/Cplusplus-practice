@@ -1,0 +1,49 @@
+#include <iostream>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <linux/vfio.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
+int main() {
+    // Open VFIO device
+    int vfio_fd = open("/dev/vfio/vfio", O_RDWR);
+    if (vfio_fd < 0) {
+        std::cerr << "Failed to open VFIO device" << std::endl;
+        return -1;
+    }
+
+    // Open specific PCI device through VFIO
+    int pci_fd = open("/dev/vfio/0000:XX:XX.X", O_RDWR);  // Replace with your PCI device ID
+    if (pci_fd < 0) {
+        std::cerr << "Failed to open PCI device" << std::endl;
+        close(vfio_fd);
+        return -1;
+    }
+
+    // Set VFIO to use the specific PCI device
+    vfio_info_cap vfiocap;
+    vfiocap.argsz = sizeof(vfio_info_cap);
+    vfiocap.flags = VFIO_DEVICE_GET_INFO;
+    ioctl(vfio_fd, VFIO_GET_API_VERSION, &vfiocap);
+
+    // Map FPGA memory
+    void* fpga_base_addr = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, pci_fd, 0);
+    if (fpga_base_addr == MAP_FAILED) {
+        std::cerr << "Memory mapping failed." << std::endl;
+        close(pci_fd);
+        close(vfio_fd);
+        return -1;
+    }
+
+    // Example read
+    uint32_t data = *(volatile uint32_t*)(fpga_base_addr);
+    std::cout << "Read Data: " << data << std::endl;
+
+    // Cleanup
+    munmap(fpga_base_addr, 4096);
+    close(pci_fd);
+    close(vfio_fd);
+
+    return 0;
+}
