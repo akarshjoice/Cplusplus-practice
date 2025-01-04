@@ -144,3 +144,22 @@ class FixClientSimulator(tk.Frame):
         # ...
         self.order_transactions_list.delete(0, tk.END)  # Clear existing transactions
         # Example: Assuming you have a function to get transactions
+        transactions = get_transactions_for_clordid(clordid)  # Replace with your logic
+        for transaction in transactions:
+            self.order_transactions_list.insert(tk.END, transaction)
+
+    def on_transaction_select(self, event):
+        # Get selected transaction details
+        selected_index = self.order_transactions_list.curselection()
+        if selected_index:
+            selected_transaction = self.order_transactions_list.get(selected_index)
+            # Update message info based on transaction details
+            # ...
+            self.message_info_text.delete("1.0", tk.END)
+            self.message_info_text.insert(tk.END, selected_transaction)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = FixClientSimulator(master=root)
+    app.pack(fill="both", expand=True)
+    root.mainloop()
