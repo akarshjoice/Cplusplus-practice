@@ -1,7 +1,9 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import socket
 import threading
+import queue
+import re
 
 class FixClientSimulator(tk.Frame):
     def __init__(self, master=None):
@@ -9,154 +11,135 @@ class FixClientSimulator(tk.Frame):
         self.master = master
         master.title("FIX Client Simulator")
 
-        # Socket setup
-        self.host = 'localhost'  # Replace with actual server address
-        self.port = 5000  # Replace with actual server port
+        self.host = 'localhost'
+        self.port = 5000
         self.client_socket = None
+        self.message_queue = queue.Queue()
+        self.orders = {}  # Store orders by ClOrdID
+        self.next_clordid = 1
 
-        # GUI elements
-        # Section 1: Order Details
-        self.section1 = tk.Frame(self)
-        self.section1.grid(row=0, column=0, sticky="nsew")
+        self.setup_menu()
+        self.setup_ui()
+        self.process_queue()
 
-        self.order_tree_frame = ttk.Labelframe(self.section1, text="Order Details")
-        self.order_tree_frame.grid(row=0, column=0, sticky="nsew")
+    def setup_menu(self):
+        menubar = tk.Menu(self.master)
+        self.master.config(menu=menubar)
+        connection_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Connection", menu=connection_menu)
+        connection_menu.add_command(label="Connect", command=self.show_connection_dialog)
+        connection_menu.add_command(label="Disconnect", command=self.disconnect_from_server, state=tk.DISABLED)  # Disable initially
+        self.disconnect_menu_item = connection_menu.index("Disconnect") #Store index for easy access
 
-        self.order_tree = ttk.Treeview(self.order_tree_frame, columns=("clordid", "price", "quantity", "messagetype"), show="headings")
-        self.order_tree.heading("clordid", text="ClOrdID")
-        self.order_tree.heading("price", text="Price")
-        self.order_tree.heading("quantity", text="Quantity")
-        self.order_tree.heading("messagetype", text="MessageType")
-        self.order_tree.grid(row=0, column=0, sticky="nsew")
+    def setup_ui(self):
+        # ... (Existing UI setup code)
 
-        self.order_tree_xscrollbar = ttk.Scrollbar(self.order_tree_frame, orient="horizontal", command=self.order_tree.xview)
-        self.order_tree.configure(xscrollcommand=self.order_tree_xscrollbar.set)
-        self.order_tree_xscrollbar.grid(row=1, column=0, sticky="ew")
-
-        self.order_tree_yscrollbar = ttk.Scrollbar(self.order_tree_frame, orient="vertical", command=self.order_tree.yview)
-        self.order_tree.configure(yscrollcommand=self.order_tree_yscrollbar.set)
-        self.order_tree_yscrollbar.grid(row=0, column=1, sticky="ns")
-
-        self.order_transactions_frame = ttk.Labelframe(self.section1, text="Order Transactions")
-        self.order_transactions_frame.grid(row=1, column=0, sticky="nsew")
-
-        self.order_transactions_list = tk.Listbox(self.order_transactions_frame)
-        self.order_transactions_list.pack(fill="both", expand=True)
-
-        self.order_transactions_xscrollbar = ttk.Scrollbar(self.order_transactions_frame, orient="horizontal", command=self.order_transactions_list.xview)
-        self.order_transactions_list.configure(xscrollcommand=self.order_transactions_xscrollbar.set)
-        self.order_transactions_xscrollbar.pack(side="bottom", fill="x")
-
-        self.order_transactions_yscrollbar = ttk.Scrollbar(self.order_transactions_frame, orient="vertical", command=self.order_transactions_list.yview)
-        self.order_transactions_list.configure(yscrollcommand=self.order_transactions_yscrollbar.set)
-        self.order_transactions_yscrollbar.pack(side="right", fill="y")
-
-        self.fix_fields_frame = ttk.Labelframe(self.section1, text="FIX Fields")
-        self.fix_fields_frame.grid(row=2, column=0, sticky="nsew")
-
-        # Labels and Entry boxes for FIX fields
-        self.symbol_label = ttk.Label(self.fix_fields_frame, text="Symbol:")
-        self.symbol_label.grid(row=0, column=0, padx=5, pady=5)
-        self.symbol_entry = ttk.Entry(self.fix_fields_frame)
-        self.symbol_entry.grid(row=0, column=1, padx=5, pady=5)
-
-        self.price_label = ttk.Label(self.fix_fields_frame, text="Price:")
-        self.price_label.grid(row=1, column=0, padx=5, pady=5)
-        self.price_entry = ttk.Entry(self.fix_fields_frame)
-        self.price_entry.grid(row=1, column=1, padx=5, pady=5)
-
-        self.qty_label = ttk.Label(self.fix_fields_frame, text="Qty:")
-        self.qty_label.grid(row=2, column=0, padx=5, pady=5)
-        self.qty_entry = ttk.Entry(self.fix_fields_frame)
-        self.qty_entry.grid(row=2, column=1, padx=5, pady=5)
-
-        self.ordertype_label = ttk.Label(self.fix_fields_frame, text="OrderType:")
-        self.ordertype_label.grid(row=3, column=0, padx=5, pady=5)
-        self.ordertype_entry = ttk.Entry(self.fix_fields_frame)
-        self.ordertype_entry.grid(row=3, column=1, padx=5, pady=5)
-
-        self.send_button = ttk.Button(self.fix_fields_frame, text="Send", command=self.send_message)
-        self.send_button.grid(row=4, columnspan=2, pady=10)
-
-        # Section 2: Message Info
-        self.section2 = tk.Frame(self)
-        self.section2.grid(row=0, column=1, sticky="nsew")
-
-        self.message_info_frame = ttk.Labelframe(self.section2, text="Message Info")
-        self.message_info_frame.grid(row=0, column=0, sticky="nsew")
-
-        self.message_info_text = tk.Text(self.message_info_frame, height=10, width=50)
-        self.message_info_text.pack(fill="both", expand=True)
-
-        # Bind events
-        self.order_tree.bind("<ButtonRelease-1>", self.on_order_tree_select)
-        self.order_transactions_list.bind("<ButtonRelease-1>", self.on_transaction_select)
-
-        # Connect to server
-        self.connect_to_server()
+    def show_connection_dialog(self):
+        # ... (Existing connection dialog code)
+        def connect():
+            # ... (Existing connect logic)
+            if ip and port.isdigit():
+                self.master.config(cursor="wait") #Set cursor to wait while connecting
+                self.master.after(100, self.connect_to_server) #Connect after 100ms to allow cursor change
+                dialog.destroy()
+            # ...
 
     def connect_to_server(self):
         try:
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.client_socket.connect((self.host, self.port))
             print("Connected to server")
-            self.receive_thread = threading.Thread(target=self.receive_messages)
+            self.receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
             self.receive_thread.start()
+            self.master.config(cursor="") #Reset cursor
+            self.master.config(menu=self.master.menu)
+            self.master.menu.entryconfig(self.disconnect_menu_item, state=tk.NORMAL)
         except Exception as e:
+            self.master.config(cursor="") #Reset cursor even on error
             print(f"Error connecting to server: {e}")
+            messagebox.showerror("Connection Error", f"Could not connect to server: {e}")
+
+    def disconnect_from_server(self):
+        try:
+            if self.client_socket:
+                self.client_socket.close()
+                self.client_socket = None
+                self.master.menu.entryconfig(self.disconnect_menu_item, state=tk.DISABLED)
+                print("Disconnected from server")
+        except Exception as e:
+            print(f"Error disconnecting: {e}")
 
     def send_message(self):
-        # Get values from entry fields
-        symbol = self.symbol_entry.get()
-        price = self.price_entry.get()
-        qty = self.qty_entry.get()
-        ordertype = self.ordertype_entry.get()
-
-        # Generate FIX message based on entered fields
-        # ... (Implement your FIX message generation logic here)
-        # Example:
-        message = f"Symbol: {symbol}, Price: {price}, Qty: {qty}, OrderType: {ordertype}" 
-
+        # ... (Existing send message logic)
+        clordid = self.next_clordid
+        self.next_clordid += 1
+        message = f"ClOrdID={clordid};Symbol={symbol};Price={price};Qty={qty};OrderType={ordertype}"
         try:
             self.client_socket.sendall(message.encode())
-            # Clear entry fields after sending
-            self.symbol_entry.delete(0, 'end')
-            self.price_entry.delete(0, 'end')
-            self.qty_entry.delete(0, 'end')
-            self.ordertype_entry.delete(0, 'end')
+            self.orders[clordid] = {"Symbol": symbol, "Price": price, "Qty": qty, "OrderType": ordertype, "Transactions": []}
+            self.update_order_tree()
         except Exception as e:
-            print(f"Error sending message: {e}")
+            messagebox.showerror("Send Error", f"Error sending message: {e}")
 
     def receive_messages(self):
-        while True:
+        while self.client_socket: #Check if socket is still open
             try:
                 data = self.client_socket.recv(1024).decode()
-                # Process received data and update order transactions and message info
-                # ...
+                if data:
+                    self.message_queue.put(data)
+                else:
+                    break #Connection closed
+            except OSError as e: #Handle socket errors
+                if e.errno == 10054: #Connection reset by peer
+                    print("Server disconnected")
+                    self.disconnect_from_server()
+                    break
+                else:
+                    print(f"Error receiving message: {e}")
+                    break
             except Exception as e:
                 print(f"Error receiving message: {e}")
                 break
 
-    def on_order_tree_select(self, event):
-        item = self.order_tree.selection()[0]
-        clordid = self.order_tree.item(item, "values")[0]
-        # Update order transactions list based on clordid
-        # ...
-        self.order_transactions_list.delete(0, tk.END)  # Clear existing transactions
-        # Example: Assuming you have a function to get transactions
-        transactions = get_transactions_for_clordid(clordid)  # Replace with your logic
-        for transaction in transactions:
-            self.order_transactions_list.insert(tk.END, transaction)
+    def process_queue(self):
+        while not self.message_queue.empty():
+            data = self.message_queue.get()
+            self.message_info_text.insert(tk.END, data + "\n")
+            self.message_info_text.see(tk.END)
+            self.process_incoming_message(data) #Process message
 
-    def on_transaction_select(self, event):
-        # Get selected transaction details
-        selected_index = self.order_transactions_list.curselection()
-        if selected_index:
-            selected_transaction = self.order_transactions_list.get(selected_index)
-            # Update message info based on transaction details
-            # ...
-            self.message_info_text.delete("1.0", tk.END)
-            self.message_info_text.insert(tk.END, selected_transaction)
+        self.master.after(100, self.process_queue)
+
+    def process_incoming_message(self, message):
+      match = re.match(r"ClOrdID=(\d+);ExecType=([^;]+);(.*)", message)
+      if match:
+          clordid = int(match.group(1))
+          exec_type = match.group(2)
+          details = match.group(3)
+
+          if clordid in self.orders:
+              self.orders[clordid]["Transactions"].append(f"ExecType={exec_type};{details}")
+              self.update_order_transactions(clordid)
+
+    def update_order_tree(self):
+        self.order_tree.delete(*self.order_tree.get_children())
+        for clordid, order in self.orders.items():
+            self.order_tree.insert("", tk.END, values=(clordid, order["Price"], order["Qty"], order["OrderType"]))
+
+    def update_order_transactions(self, clordid):
+        self.order_transactions_list.delete(0, tk.END)
+        if clordid in self.orders:
+            for transaction in self.orders[clordid]["Transactions"]:
+                self.order_transactions_list.insert(tk.END, transaction)
+
+    def on_order_tree_select(self, event):
+        selected = self.order_tree.selection()
+        if selected:
+            item = selected[0]
+            clordid = self.order_tree.item(item, "values")[0]
+            self.update_order_transactions(int(clordid))
+
+    # ... (rest of the code)
 
 if __name__ == "__main__":
     root = tk.Tk()
