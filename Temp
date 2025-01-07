@@ -1,0 +1,47 @@
+# FIX Fields Frame with Scrollable Canvas
+        self.fix_fields_frame = ttk.Labelframe(self.section1, text="FIX Fields")
+        self.fix_fields_frame.grid(row=2, column=0, sticky="nsew")
+        
+        # Canvas and Scrollbars
+        self.fix_canvas = tk.Canvas(self.fix_fields_frame)
+        self.fix_scrollbar_y = ttk.Scrollbar(self.fix_fields_frame, orient="vertical", command=self.fix_canvas.yview)
+        self.fix_scrollbar_x = ttk.Scrollbar(self.fix_fields_frame, orient="horizontal", command=self.fix_canvas.xview)
+
+        # Scrollable Frame
+        self.scrollable_fix_frame = ttk.Frame(self.fix_canvas)
+
+        # Configure Canvas
+        self.fix_canvas.configure(yscrollcommand=self.fix_scrollbar_y.set, xscrollcommand=self.fix_scrollbar_x.set)
+        self.fix_scrollbar_y.pack(side="right", fill="y")
+        self.fix_scrollbar_x.pack(side="bottom", fill="x")
+        self.fix_canvas.pack(side="left", fill="both", expand=True)
+
+        # Place the scrollable frame inside the canvas
+        self.fix_canvas.create_window((0, 0), window=self.scrollable_fix_frame, anchor="nw")
+
+        # Dynamically resize the canvas when contents change
+        self.scrollable_fix_frame.bind("<Configure>", lambda e: self.fix_canvas.configure(scrollregion=self.fix_canvas.bbox("all")))
+
+        # Input Fields in Scrollable Frame
+        self.symbol_label = ttk.Label(self.scrollable_fix_frame, text="Symbol:")
+        self.symbol_label.grid(row=0, column=0, padx=5, pady=5)
+        self.symbol_entry = ttk.Entry(self.scrollable_fix_frame)
+        self.symbol_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        self.price_label = ttk.Label(self.scrollable_fix_frame, text="Price:")
+        self.price_label.grid(row=1, column=0, padx=5, pady=5)
+        self.price_entry = ttk.Entry(self.scrollable_fix_frame)
+        self.price_entry.grid(row=1, column=1, padx=5, pady=5)
+
+        self.qty_label = ttk.Label(self.scrollable_fix_frame, text="Qty:")
+        self.qty_label.grid(row=2, column=0, padx=5, pady=5)
+        self.qty_entry = ttk.Entry(self.scrollable_fix_frame)
+        self.qty_entry.grid(row=2, column=1, padx=5, pady=5)
+
+        self.ordertype_label = ttk.Label(self.scrollable_fix_frame, text="OrderType:")
+        self.ordertype_label.grid(row=3, column=0, padx=5, pady=5)
+        self.ordertype_entry = ttk.Entry(self.scrollable_fix_frame)
+        self.ordertype_entry.grid(row=3, column=1, padx=5, pady=5)
+
+        self.send_button = ttk.Button(self.scrollable_fix_frame, text="Send", command=self.send_message)
+        self.send_button.grid(row=4, columnspan=2, pady=10)
