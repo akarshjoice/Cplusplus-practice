@@ -10,13 +10,13 @@ class FixFieldsFrame(tk.Frame):
         self.init_ui()
 
     def init_ui(self):
-        # Title Label
-        title = ttk.Label(self, text="FIX Input Fields", font=("Helvetica", 16, "bold"))
-        title.grid(row=0, column=0, columnspan=3, pady=(10, 20))
+        # LabelFrame for "FIX Input Fields"
+        fix_label_frame = ttk.LabelFrame(self, text="FIX Input Fields", padding=(10, 5))
+        fix_label_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
         # Tabs for different message types
-        self.notebook = ttk.Notebook(self)
-        self.notebook.grid(row=1, column=0, columnspan=3, sticky="nsew", padx=20, pady=10)
+        self.notebook = ttk.Notebook(fix_label_frame)
+        self.notebook.grid(row=0, column=0, sticky="nsew", padx=20, pady=10)
 
         # New Order Tab
         self.new_order_frame = ttk.Frame(self.notebook)
