@@ -1,42 +1,74 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 
-class LoginDialog(tk.Toplevel):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.title("Connect to Server")
-        self.geometry("300x150")
-        self.transient(parent)
-        self.grab_set()  # Ensures only this dialog is active
-        self.result = None
+class FixFieldsFrame(tk.Frame):
+    def __init__(self, master, fix_fields):
+        super().__init__(master)
+        self.fix_fields = fix_fields
+        self.entries = {}  # Store widgets for each field
+        self.optional_checkboxes = {}  # Track checkboxes for optional fields
+        self.init_ui()
 
-        self.setup_ui()
+    def init_ui(self):
+        for i, field in enumerate(self.fix_fields):
+            field_name = field["name"]
+            is_optional = field.get("optional", False)
+            options = field.get("options", None)
 
-    def setup_ui(self):
-        tk.Label(self, text="Server IP:").pack(pady=5)
-        self.ip_entry = ttk.Entry(self)
-        self.ip_entry.pack(pady=5)
+            # Field label
+            ttk.Label(self, text=field_name).grid(row=i, column=0, sticky="w", padx=5, pady=5)
 
-        tk.Label(self, text="Port:").pack(pady=5)
-        self.port_entry = ttk.Entry(self)
-        self.port_entry.pack(pady=5)
+            # Field input (Entry or OptionMenu)
+            if options:
+                selected_option = tk.StringVar(value=options[0])  # Default to first option
+                dropdown = ttk.OptionMenu(self, selected_option, *options)
+                dropdown.grid(row=i, column=1, padx=5, pady=5, sticky="ew")
+                self.entries[field_name] = selected_option
+            else:
+                entry = ttk.Entry(self)
+                entry.grid(row=i, column=1, padx=5, pady=5, sticky="ew")
+                self.entries[field_name] = entry
 
-        button_frame = tk.Frame(self)
-        button_frame.pack(pady=10)
+            # Optional checkbox
+            if is_optional:
+                optional_var = tk.BooleanVar(value=False)
+                optional_checkbox = ttk.Checkbutton(self, text="Optional", variable=optional_var)
+                optional_checkbox.grid(row=i, column=2, padx=5, pady=5)
+                self.optional_checkboxes[field_name] = optional_var
 
-        ttk.Button(button_frame, text="Connect", command=self.on_connect).grid(row=0, column=0, padx=5)
-        ttk.Button(button_frame, text="Cancel", command=self.on_cancel).grid(row=0, column=1, padx=5)
+        # Submit button
+        submit_btn = ttk.Button(self, text="Submit", command=self.submit_fields)
+        submit_btn.grid(row=len(self.fix_fields), column=0, columnspan=3, pady=10)
 
-    def on_connect(self):
-        ip = self.ip_entry.get().strip()
-        port = self.port_entry.get().strip()
+    def submit_fields(self):
+        field_values = {}
+        for field_name, widget in self.entries.items():
+            # Check if the field is optional and not checked
+            if field_name in self.optional_checkboxes and not self.optional_checkboxes[field_name].get():
+                continue  # Skip this optional field
 
-        if ip and port.isdigit():
-            self.result = (ip, int(port))  # Return the entered data
-            self.destroy()
-        else:
-            messagebox.showerror("Error", "Invalid IP or Port")
+            # Get the value from the appropriate widget
+            if isinstance(widget, tk.StringVar):  # For OptionMenu
+                field_values[field_name] = widget.get()
+            elif isinstance(widget, ttk.Entry):  # For Entry
+                field_values[field_name] = widget.get()
 
-    def on_cancel(self):
-        self.result = None
-        self.destroy()
+        print("Submitted Fields:", field_values)  # Display field values (can be sent as FIX message)
+
+# Example FIX fields
+fix_fields = [
+    {"name": "Symbol", "optional": False},
+    {"name": "Price", "optional": False},
+    {"name": "Quantity", "optional": False},
+    {"name": "Order Type", "optional": True, "options": ["Market", "Limit", "Stop"]},
+    {"name": "Time in Force", "optional": True, "options": ["Day", "GTC", "IOC"]},
+]
+
+# Main application
+root = tk.Tk()
+root.title("FIX Input Fields")
+
+fix_frame = FixFieldsFrame(root, fix_fields)
+fix_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+root.mainloop()
