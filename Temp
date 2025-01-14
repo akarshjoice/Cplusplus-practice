@@ -5,40 +5,80 @@ class FixFieldsFrame(tk.Frame):
     def __init__(self, master, fix_fields):
         super().__init__(master)
         self.fix_fields = fix_fields
-        self.entries = {}  # Store widgets for each field
-        self.optional_checkboxes = {}  # Track checkboxes for optional fields
+        self.entries = {}
+        self.optional_checkboxes = {}
         self.init_ui()
 
     def init_ui(self):
-        for i, field in enumerate(self.fix_fields):
+        # Title Label
+        title = ttk.Label(self, text="FIX Input Fields", font=("Helvetica", 16, "bold"))
+        title.grid(row=0, column=0, columnspan=3, pady=(10, 20))
+
+        # Tabs for different message types
+        self.notebook = ttk.Notebook(self)
+        self.notebook.grid(row=1, column=0, columnspan=3, sticky="nsew", padx=20, pady=10)
+
+        # New Order Tab
+        self.new_order_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.new_order_frame, text="New Order")
+        self.create_scrollable_frame(self.new_order_frame, self.fix_fields['NewOrder'])
+
+        # Replace Tab
+        self.replace_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.replace_frame, text="Replace")
+        self.create_scrollable_frame(self.replace_frame, self.fix_fields['Replace'])
+
+        # Cancel Tab
+        self.cancel_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.cancel_frame, text="Cancel")
+        self.create_scrollable_frame(self.cancel_frame, self.fix_fields['Cancel'])
+
+    def create_scrollable_frame(self, parent, fields):
+        # Canvas and Scrollbar
+        canvas = tk.Canvas(parent)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Create a frame that will be placed inside the canvas
+        field_frame = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=field_frame, anchor="nw")
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        field_frame.columnconfigure(1, weight=1)  # Make the input column expand
+
+        for i, field in enumerate(fields):
             field_name = field["name"]
             is_optional = field.get("optional", False)
             options = field.get("options", None)
 
             # Field label
-            ttk.Label(self, text=field_name).grid(row=i, column=0, sticky="w", padx=5, pady=5)
+            label = ttk.Label(field_frame, text=f"{field_name}:", font=("Helvetica", 12))
+            label.grid(row=i, column=0, sticky="w", padx=5, pady=5)
 
             # Field input (Entry or OptionMenu)
             if options:
                 selected_option = tk.StringVar(value=options[0])  # Default to first option
-                dropdown = ttk.OptionMenu(self, selected_option, *options)
+                dropdown = ttk.OptionMenu(field_frame, selected_option, *options)
                 dropdown.grid(row=i, column=1, padx=5, pady=5, sticky="ew")
                 self.entries[field_name] = selected_option
             else:
-                entry = ttk.Entry(self)
+                entry = ttk.Entry(field_frame)
                 entry.grid(row=i, column=1, padx=5, pady=5, sticky="ew")
                 self.entries[field_name] = entry
 
             # Optional checkbox
             if is_optional:
                 optional_var = tk.BooleanVar(value=False)
-                optional_checkbox = ttk.Checkbutton(self, text="Optional", variable=optional_var)
+                optional_checkbox = ttk.Checkbutton(
+                    field_frame, text="Optional", variable=optional_var
+                )
                 optional_checkbox.grid(row=i, column=2, padx=5, pady=5)
                 self.optional_checkboxes[field_name] = optional_var
 
-        # Submit button
-        submit_btn = ttk.Button(self, text="Submit", command=self.submit_fields)
-        submit_btn.grid(row=len(self.fix_fields), column=0, columnspan=3, pady=10)
+        # Update the scrollable area after adding the fields
+        field_frame.update_idletasks()
+        canvas.config(scrollregion=canvas.bbox("all"))
 
     def submit_fields(self):
         field_values = {}
@@ -55,18 +95,45 @@ class FixFieldsFrame(tk.Frame):
 
         print("Submitted Fields:", field_values)  # Display field values (can be sent as FIX message)
 
-# Example FIX fields
-fix_fields = [
-    {"name": "Symbol", "optional": False},
-    {"name": "Price", "optional": False},
-    {"name": "Quantity", "optional": False},
-    {"name": "Order Type", "optional": True, "options": ["Market", "Limit", "Stop"]},
-    {"name": "Time in Force", "optional": True, "options": ["Day", "GTC", "IOC"]},
-]
+    def reset_fields(self):
+        # Clear all fields
+        for field_name, widget in self.entries.items():
+            if isinstance(widget, tk.StringVar):  # For OptionMenu
+                widget.set(widget.get())  # Reset to default
+            elif isinstance(widget, ttk.Entry):  # For Entry
+                widget.delete(0, tk.END)
+
+        # Uncheck all optional checkboxes
+        for checkbox_var in self.optional_checkboxes.values():
+            checkbox_var.set(False)
+
+
+# Example FIX fields for different message types
+fix_fields = {
+    "NewOrder": [
+        {"name": "Symbol", "optional": False},
+        {"name": "Price", "optional": False},
+        {"name": "Quantity", "optional": False},
+        {"name": "Order Type", "optional": True, "options": ["Market", "Limit", "Stop"]},
+        {"name": "Time in Force", "optional": True, "options": ["Day", "GTC", "IOC"]},
+    ],
+    "Replace": [
+        {"name": "ClOrdID", "optional": False},
+        {"name": "OrigClOrdID", "optional": False},
+        {"name": "Price", "optional": True},
+        {"name": "Quantity", "optional": True},
+    ],
+    "Cancel": [
+        {"name": "ClOrdID", "optional": False},
+        {"name": "OrigClOrdID", "optional": False},
+    ],
+}
 
 # Main application
 root = tk.Tk()
 root.title("FIX Input Fields")
+root.geometry("600x500")
+root.resizable(True, True)
 
 fix_frame = FixFieldsFrame(root, fix_fields)
 fix_frame.pack(fill="both", expand=True, padx=10, pady=10)
