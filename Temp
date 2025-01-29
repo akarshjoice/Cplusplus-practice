@@ -1,9 +1,9 @@
 import tkinter as tk
-from tkinter import ttk
-from tkinter import simpledialog, messagebox
+from tkinter import ttk, messagebox
 import socket
 import threading
 import queue
+
 
 class FixClientSimulator(tk.Frame):
     def __init__(self, master=None):
@@ -11,8 +11,9 @@ class FixClientSimulator(tk.Frame):
         self.master = master
         master.title("FIX Client Simulator")
 
-        # Store sessions
-        self.sessions = {}
+        # Socket setup
+        self.sessions = {}  # Dictionary to store session data
+        self.current_session = None  # Currently active session
 
         # Menu bar
         self.setup_menu()
@@ -26,152 +27,155 @@ class FixClientSimulator(tk.Frame):
 
         # Connection menu
         connection_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Connection", menu=connection_menu)
-        connection_menu.add_command(label="Connect", command=self.show_connection_dialog)
+        menubar.add_cascade(label="Session", menu=connection_menu)
+        connection_menu.add_command(label="New Session", command=self.add_new_session)
 
     def setup_ui(self):
+        # Layout configuration
         self.grid(row=0, column=0, sticky="nsew")
         self.master.rowconfigure(0, weight=1)
         self.master.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
 
-        # Main Notebook (for Sessions)
+        # Tab control for sessions (footer)
         self.notebook = ttk.Notebook(self)
-        self.notebook.grid(row=1, column=0, sticky="nsew")
+        self.notebook.grid(row=1, column=0, sticky="ew")
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_selected)
 
-        # Add Session Button
-        self.add_session_button = ttk.Button(self, text="Add Session", command=self.add_session)
-        self.add_session_button.grid(row=2, column=0, pady=5)
+    def add_new_session(self):
+        """Opens a dialog to create a new session."""
+        dialog = tk.Toplevel(self)
+        dialog.title("New Session")
+        dialog.geometry("300x150")
 
-    def add_session(self):
-        session_name = simpledialog.askstring("New Session", "Enter session name:")
-        if not session_name:
-            return
+        tk.Label(dialog, text="Session Name:").pack(pady=5)
+        session_entry = ttk.Entry(dialog)
+        session_entry.pack(pady=5)
 
-        if session_name in self.sessions:
-            messagebox.showerror("Error", "Session already exists!")
-            return
+        def create_session():
+            session_name = session_entry.get().strip()
+            if session_name and session_name not in self.sessions:
+                dialog.destroy()
+                self.create_session_tab(session_name)
+            else:
+                messagebox.showerror("Error", "Invalid or duplicate session name.")
 
-        # Create a new session frame
-        session_frame = ttk.Frame(self.notebook)
-        self.sessions[session_name] = session_frame
+        ttk.Button(dialog, text="Create", command=create_session).pack(pady=10)
 
-        # Add session-specific UI inside the tab
-        self.create_session_ui(session_frame, session_name)
+    def create_session_tab(self, session_name):
+        """Creates a new tab for the given session name."""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text=session_name)
 
-        # Add tab to notebook
-        self.notebook.add(session_frame, text=session_name)
-
-    def create_session_ui(self, parent, session_name):
-        """Creates UI for a specific session inside the notebook tab."""
-        # Order Details Section
-        order_tree_frame = ttk.Labelframe(parent, text=f"{session_name} - Order Details")
-        order_tree_frame.pack(fill="both", expand=True, padx=5, pady=5)
-
-        order_tree = ttk.Treeview(order_tree_frame, columns=("ClOrdID", "Price", "Quantity", "MsgType"), show="headings")
-        order_tree.heading("ClOrdID", text="ClOrdID")
-        order_tree.heading("Price", text="Price")
-        order_tree.heading("Quantity", text="Quantity")
-        order_tree.heading("MsgType", text="MessageType")
-        order_tree.pack(fill="both", expand=True)
-
-        # Order Transactions
-        transactions_frame = ttk.Labelframe(parent, text="Order Transactions")
-        transactions_frame.pack(fill="both", expand=True, padx=5, pady=5)
-
-        transactions_list = tk.Listbox(transactions_frame)
-        transactions_list.pack(fill="both", expand=True)
-
-        # FIX Fields
-        fix_fields_frame = ttk.Labelframe(parent, text="FIX Fields")
-        fix_fields_frame.pack(fill="x", padx=5, pady=5)
-
-        ttk.Label(fix_fields_frame, text="Symbol:").pack(side="left", padx=5)
-        symbol_entry = ttk.Entry(fix_fields_frame)
-        symbol_entry.pack(side="left", padx=5)
-
-        ttk.Label(fix_fields_frame, text="Price:").pack(side="left", padx=5)
-        price_entry = ttk.Entry(fix_fields_frame)
-        price_entry.pack(side="left", padx=5)
-
-        ttk.Label(fix_fields_frame, text="Qty:").pack(side="left", padx=5)
-        qty_entry = ttk.Entry(fix_fields_frame)
-        qty_entry.pack(side="left", padx=5)
-
-        ttk.Label(fix_fields_frame, text="Order Type:").pack(side="left", padx=5)
-        ordertype_entry = ttk.Entry(fix_fields_frame)
-        ordertype_entry.pack(side="left", padx=5)
-
-        send_button = ttk.Button(fix_fields_frame, text="Send", command=lambda: self.send_message(session_name))
-        send_button.pack(side="left", padx=10)
-
-        # Store session-specific elements
-        self.sessions[session_name] = {
-            "frame": parent,
-            "order_tree": order_tree,
-            "transactions_list": transactions_list,
-            "symbol_entry": symbol_entry,
-            "price_entry": price_entry,
-            "qty_entry": qty_entry,
-            "ordertype_entry": ordertype_entry
+        # Create session-specific data
+        session_data = {
+            "frame": frame,
+            "host": "localhost",
+            "port": 5000,
+            "socket": None,
+            "queue": queue.Queue(),
+            "order_tree": None,
+            "message_info_text": None,
+            "thread": None
         }
+        self.sessions[session_name] = session_data
 
-    def send_message(self, session_name):
-        """Send a FIX message from a specific session."""
+        # Build UI inside the tab
+        self.build_session_ui(frame, session_name)
+
+    def build_session_ui(self, frame, session_name):
+        """Builds the UI for a session tab."""
+        session = self.sessions[session_name]
+
+        order_tree_frame = ttk.Labelframe(frame, text="Orders")
+        order_tree_frame.pack(fill="both", expand=True)
+
+        session["order_tree"] = ttk.Treeview(order_tree_frame, columns=("clordid", "price", "quantity"), show="headings")
+        session["order_tree"].heading("clordid", text="ClOrdID")
+        session["order_tree"].heading("price", text="Price")
+        session["order_tree"].heading("quantity", text="Quantity")
+        session["order_tree"].pack(fill="both", expand=True)
+
+        message_info_frame = ttk.Labelframe(frame, text="Message Info")
+        message_info_frame.pack(fill="both", expand=True)
+
+        session["message_info_text"] = tk.Text(message_info_frame, height=5, wrap="word")
+        session["message_info_text"].pack(fill="both", expand=True)
+
+        control_frame = ttk.Frame(frame)
+        control_frame.pack(fill="x")
+
+        send_button = ttk.Button(control_frame, text="Send", command=lambda: self.send_message(session_name))
+        send_button.pack(side="right", padx=5, pady=5)
+
+        connect_button = ttk.Button(control_frame, text="Connect", command=lambda: self.connect_to_server(session_name))
+        connect_button.pack(side="right", padx=5, pady=5)
+
+    def on_tab_selected(self, event):
+        """Handles tab switch and updates current session."""
+        selected_tab = self.notebook.select()
+        tab_index = self.notebook.index(selected_tab)
+        session_name = self.notebook.tab(selected_tab, "text")
+        self.current_session = session_name
+        print(f"Switched to session: {session_name}")
+
+    def connect_to_server(self, session_name):
+        """Connects to the server for the selected session."""
         session = self.sessions.get(session_name)
         if not session:
             return
 
-        symbol = session["symbol_entry"].get()
-        price = session["price_entry"].get()
-        qty = session["qty_entry"].get()
-        ordertype = session["ordertype_entry"].get()
-
-        message = f"{session_name} - Symbol={symbol};Price={price};Qty={qty};OrderType={ordertype}"
-        print(f"Sending Message: {message}")  # Replace with actual socket sending logic
-
-        # Clear entries
-        session["symbol_entry"].delete(0, tk.END)
-        session["price_entry"].delete(0, tk.END)
-        session["qty_entry"].delete(0, tk.END)
-        session["ordertype_entry"].delete(0, tk.END)
-
-    def show_connection_dialog(self):
-        """Show a dialog to enter connection details."""
-        dialog = tk.Toplevel(self)
-        dialog.title("Connect to Server")
-        dialog.geometry("300x150")
-
-        tk.Label(dialog, text="Server IP:").pack(pady=5)
-        ip_entry = ttk.Entry(dialog)
-        ip_entry.pack(pady=5)
-
-        tk.Label(dialog, text="Port:").pack(pady=5)
-        port_entry = ttk.Entry(dialog)
-        port_entry.pack(pady=5)
-
-        def connect():
-            ip = ip_entry.get().strip()
-            port = port_entry.get().strip()
-            if ip and port.isdigit():
-                self.host = ip
-                self.port = int(port)
-                dialog.destroy()
-                self.connect_to_server()
-            else:
-                messagebox.showerror("Error", "Invalid IP or Port")
-
-        connect_button = ttk.Button(dialog, text="Connect", command=connect)
-        connect_button.pack(pady=10)
-
-    def connect_to_server(self):
-        """Establish connection to the server."""
         try:
-            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.client_socket.connect((self.host, self.port))
-            print("Connected to server")
+            session["socket"] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            session["socket"].connect((session["host"], session["port"]))
+            print(f"Connected to server for session {session_name}")
+            session["thread"] = threading.Thread(target=self.receive_messages, args=(session_name,), daemon=True)
+            session["thread"].start()
         except Exception as e:
-            print(f"Error connecting to server: {e}")
-            messagebox.showerror("Connection Error", f"Could not connect to server: {e}")
+            messagebox.showerror("Connection Error", f"Could not connect for {session_name}: {e}")
+
+    def send_message(self, session_name):
+        """Sends a FIX message for the selected session."""
+        session = self.sessions.get(session_name)
+        if not session or not session["socket"]:
+            return
+
+        message = f"FIX message from session {session_name}"
+        try:
+            session["socket"].sendall(message.encode())
+        except Exception as e:
+            print(f"Error sending message for {session_name}: {e}")
+
+    def receive_messages(self, session_name):
+        """Receives messages for the selected session."""
+        session = self.sessions.get(session_name)
+        if not session:
+            return
+
+        while True:
+            try:
+                data = session["socket"].recv(1024).decode()
+                if data:
+                    session["queue"].put(data)
+                    self.process_queue(session_name)
+                else:
+                    break
+            except Exception as e:
+                print(f"Error receiving message for {session_name}: {e}")
+                break
+
+    def process_queue(self, session_name):
+        """Processes the message queue for the selected session."""
+        session = self.sessions.get(session_name)
+        if not session:
+            return
+
+        while not session["queue"].empty():
+            data = session["queue"].get()
+            session["message_info_text"].insert(tk.END, data + "\n")
+            session["message_info_text"].see(tk.END)
+
 
 if __name__ == "__main__":
     root = tk.Tk()
