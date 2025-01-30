@@ -1,0 +1,238 @@
+import tkinter as tk
+from tkinter import ttk
+from tkinter import simpledialog, messagebox
+import socket
+import threading
+import queue
+
+
+class FixClientSimulator(tk.Frame):
+    def __init__(self, master=None):
+        super().__init__(master)
+        self.master = master
+        master.title("FIX Client Simulator")
+
+        # Socket setup
+        self.host = 'localhost'  # Default server address
+        self.port = 5000  # Default server port
+        self.client_socket = None
+        self.message_queue = queue.Queue()
+
+        # Menu bar
+        self.setup_menu()
+
+        # Notebook for multiple sessions
+        self.notebook = ttk.Notebook(self.master)
+        self.notebook.pack(fill="both", expand=True)
+
+        # Add initial session
+        self.add_session()
+
+        # Start processing the message queue
+        self.process_queue()
+
+    def setup_menu(self):
+        menubar = tk.Menu(self.master)
+        self.master.config(menu=menubar)
+
+        # Connection menu
+        connection_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Connection", menu=connection_menu)
+        connection_menu.add_command(label="Connect", command=self.show_connection_dialog)
+        connection_menu.add_command(label="Add Session", command=self.add_session)
+
+    def add_session(self):
+        session_frame = tk.Frame(self.notebook)
+        self.notebook.add(session_frame, text=f"Session {self.notebook.index('end') + 1}")
+        self.setup_ui(session_frame)
+
+    def setup_ui(self, session_frame):
+        # Layout configuration
+        session_frame.grid(row=0, column=0, sticky="nsew")
+        session_frame.rowconfigure(0, weight=1)
+        session_frame.columnconfigure(0, weight=1)
+        session_frame.rowconfigure(0, weight=1)
+        session_frame.columnconfigure(0, weight=3)
+        session_frame.columnconfigure(1, weight=1)
+
+        # Section 1: Order Details
+        self.section1 = tk.Frame(session_frame)
+        self.section1.grid(row=0, column=0, sticky="nsew")
+        self.section1.rowconfigure(0, weight=1)
+        self.section1.rowconfigure(1, weight=1)
+        self.section1.rowconfigure(2, weight=1)
+
+        self.order_tree_frame = ttk.Labelframe(self.section1, text="Order Details")
+        self.order_tree_frame.grid(row=0, column=0, sticky="nsew")
+        self.order_tree_frame.rowconfigure(0, weight=1)
+        self.order_tree_frame.columnconfigure(0, weight=1)
+
+        self.order_tree = ttk.Treeview(self.order_tree_frame, columns=("clordid", "price", "quantity", "messagetype"), show="headings")
+        self.order_tree.heading("clordid", text="ClOrdID")
+        self.order_tree.heading("price", text="Price")
+        self.order_tree.heading("quantity", text="Quantity")
+        self.order_tree.heading("messagetype", text="MessageType")
+        self.order_tree.grid(row=0, column=0, sticky="nsew")
+
+        self.order_tree_xscrollbar = ttk.Scrollbar(self.order_tree_frame, orient="horizontal", command=self.order_tree.xview)
+        self.order_tree.configure(xscrollcommand=self.order_tree_xscrollbar.set)
+        self.order_tree_xscrollbar.grid(row=1, column=0, sticky="ew")
+
+        self.order_tree_yscrollbar = ttk.Scrollbar(self.order_tree_frame, orient="vertical", command=self.order_tree.yview)
+        self.order_tree.configure(yscrollcommand=self.order_tree_yscrollbar.set)
+        self.order_tree_yscrollbar.grid(row=0, column=1, sticky="ns")
+
+        self.order_transactions_frame = ttk.Labelframe(self.section1, text="Order Transactions")
+        self.order_transactions_frame.grid(row=1, column=0, sticky="nsew")
+        self.order_transactions_frame.rowconfigure(0, weight=1)
+        self.order_transactions_frame.columnconfigure(0, weight=1)
+
+        self.order_transactions_list = tk.Listbox(self.order_transactions_frame)
+        self.order_transactions_list.grid(row=0, column=0, sticky="nsew")
+
+        self.order_transactions_xscrollbar = ttk.Scrollbar(self.order_transactions_frame, orient="horizontal", command=self.order_transactions_list.xview)
+        self.order_transactions_list.configure(xscrollcommand=self.order_transactions_xscrollbar.set)
+        self.order_transactions_xscrollbar.grid(row=1, column=0, sticky="ew")
+
+        self.order_transactions_yscrollbar = ttk.Scrollbar(self.order_transactions_frame, orient="vertical", command=self.order_transactions_list.yview)
+        self.order_transactions_list.configure(yscrollcommand=self.order_transactions_yscrollbar.set)
+        self.order_transactions_yscrollbar.grid(row=0, column=1, sticky="ns")
+
+        self.fix_fields_frame = ttk.Labelframe(self.section1, text="FIX Fields")
+        self.fix_fields_frame.grid(row=2, column=0, sticky="nsew")
+        self.fix_fields_frame.columnconfigure(1, weight=1)
+
+        self.symbol_label = ttk.Label(self.fix_fields_frame, text="Symbol:")
+        self.symbol_label.grid(row=0, column=0, padx=5, pady=5)
+        self.symbol_entry = ttk.Entry(self.fix_fields_frame)
+        self.symbol_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        self.price_label = ttk.Label(self.fix_fields_frame, text="Price:")
+        self.price_label.grid(row=1, column=0, padx=5, pady=5)
+        self.price_entry = ttk.Entry(self.fix_fields_frame)
+        self.price_entry.grid(row=1, column=1, padx=5, pady=5)
+
+        self.qty_label = ttk.Label(self.fix_fields_frame, text="Qty:")
+        self.qty_label.grid(row=2, column=0, padx=5, pady=5)
+        self.qty_entry = ttk.Entry(self.fix_fields_frame)
+        self.qty_entry.grid(row=2, column=1, padx=5, pady=5)
+
+        self.ordertype_label = ttk.Label(self.fix_fields_frame, text="OrderType:")
+        self.ordertype_label.grid(row=3, column=0, padx=5, pady=5)
+        self.ordertype_entry = ttk.Entry(self.fix_fields_frame)
+        self.ordertype_entry.grid(row=3, column=1, padx=5, pady=5)
+
+        self.send_button = ttk.Button(self.fix_fields_frame, text="Send", command=self.send_message)
+        self.send_button.grid(row=4, columnspan=2, pady=10)
+
+        # Section 2: Message Info
+        self.section2 = tk.Frame(session_frame)
+        self.section2.grid(row=0, column=1, sticky="nsew")
+        self.section2.rowconfigure(0, weight=1)
+        self.section2.columnconfigure(0, weight=1)
+
+        self.message_info_frame = ttk.Labelframe(self.section2, text="Message Info")
+        self.message_info_frame.grid(row=0, column=0, sticky="nsew")
+        self.message_info_text = tk.Text(self.message_info_frame, height=10, wrap="word")
+        self.message_info_text.pack(fill="both", expand=True)
+
+        # Bind events
+        self.order_tree.bind("<ButtonRelease-1>", self.on_order_tree_select)
+        self.order_transactions_list.bind("<ButtonRelease-1>", self.on_transaction_select)
+
+    def show_connection_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Connect to Server")
+        dialog.geometry("300x150")
+
+        tk.Label(dialog, text="Server IP:").pack(pady=5)
+        ip_entry = ttk.Entry(dialog)
+        ip_entry.pack(pady=5)
+
+        tk.Label(dialog, text="Port:").pack(pady=5)
+        port_entry = ttk.Entry(dialog)
+        port_entry.pack(pady=5)
+
+        def connect():
+            ip = ip_entry.get().strip()
+            port = port_entry.get().strip()
+            if ip and port.isdigit():
+                self.host = ip
+                self.port = int(port)
+                dialog.destroy()
+                self.connect_to_server()
+            else:
+                messagebox.showerror("Error", "Invalid IP or Port")
+
+        connect_button = ttk.Button(dialog, text="Connect", command=connect)
+        connect_button.pack(pady=10)
+
+    def connect_to_server(self):
+        try:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((self.host, self.port))
+            print("Connected to server")
+            self.receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
+            self.receive_thread.start()
+        except Exception as e:
+            print(f"Error connecting to server: {e}")
+            messagebox.showerror("Connection Error", f"Could not connect to server: {e}")
+
+    def send_message(self):
+        symbol = self.symbol_entry.get()
+        price = self.price_entry.get()
+        qty = self.qty_entry.get()
+        ordertype = self.ordertype_entry.get()
+
+        message = f"Symbol={symbol};Price={price};Qty={qty};OrderType={ordertype}"
+        try:
+            self.client_socket.sendall(message.encode())
+            self.symbol_entry.delete(0, tk.END)
+            self.price_entry.delete(0, tk.END)
+            self.qty_entry.delete(0, tk.END)
+            self.ordertype_entry.delete(0, tk.END)
+        except Exception as e:
+            print(f"Error sending message: {e}")
+
+    def receive_messages(self):
+        while True:
+            try:
+                data = self.client_socket.recv(1024).decode()
+                if data:
+                    self.message_queue.put(data)
+                else:
+                    break
+            except Exception as e:
+                print(f"Error receiving message: {e}")
+                break
+
+    def process_queue(self):
+        while not self.message_queue.empty():
+            data = self.message_queue.get()
+            self.message_info_text.insert(tk.END, data + "\n")
+            self.message_info_text.see(tk.END)
+        self.master.after(100, self.process_queue)
+
+    def on_order_tree_select(self, event):
+        selected = self.order_tree.selection()
+        if not selected:
+            return
+        item = selected[0]
+        clordid = self.order_tree.item(item, "values")[0]
+        print(f"Selected ClOrdID: {clordid}")
+
+    def on_transaction_select(self, event):
+        selected_index = self.order_transactions_list.curselection()
+        if selected_index:
+            selected_transaction = self.order_transactions_list.get(selected_index)
+            # Display selected transaction details in the Message Info section
+            self.message_info_text.delete("1.0", tk.END)
+            self.message_info_text.insert(tk.END, selected_transaction)
+            self.message_info_text.see(tk.END)
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = FixClientSimulator(master=root)
+    app.pack(fill="both", expand=True)
+    root.mainloop()
