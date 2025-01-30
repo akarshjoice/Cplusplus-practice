@@ -16,13 +16,13 @@ class Session:
         self.connected = False
         
         # GUI components
-        self.symbol_entry = None
-        self.price_entry = None
-        self.qty_entry = None
-        self.ordertype_entry = None
-        self.message_info_text = None
-        self.order_tree = None
-        self.order_transactions_list = None
+        self.symbol_entry = ttk.Entry()
+        self.price_entry = ttk.Entry()
+        self.qty_entry = ttk.Entry()
+        self.ordertype_entry = ttk.Entry()
+        self.message_info_text = tk.Text()
+        self.order_tree = ttk.Treeview()
+        self.order_transactions_list = tk.Listbox()
         
         self.setup_ui()
 
@@ -73,6 +73,9 @@ class Session:
         self.ordertype_entry = ttk.Entry(fields_frame)
         self.ordertype_entry.grid(row=3, column=1, padx=5, pady=5)
 
+        send_btn = ttk.Button(fields_frame, text="Send", command=self.send_message)
+        send_btn.grid(row=4, columnspan=2, pady=10)
+
         # Right panel
         right_panel = ttk.Frame(main_frame)
         right_panel.pack(side='right', fill='both', expand=True)
@@ -83,6 +86,24 @@ class Session:
 
         self.message_info_text = tk.Text(message_frame, wrap='word')
         self.message_info_text.pack(fill='both', expand=True)
+
+    def send_message(self):
+        if not self.connected:
+            return
+
+        msg = (f"Symbol={self.symbol_entry.get()};"
+               f"Price={self.price_entry.get()};"
+               f"Qty={self.qty_entry.get()};"
+               f"OrderType={self.ordertype_entry.get()}")
+        
+        try:
+            self.client_socket.sendall(msg.encode())
+            self.symbol_entry.delete(0, tk.END)
+            self.price_entry.delete(0, tk.END)
+            self.qty_entry.delete(0, tk.END)
+            self.ordertype_entry.delete(0, tk.END)
+        except Exception as e:
+            messagebox.showerror("Send Error", f"Failed to send message: {e}")
 
 class FixClientSimulator(tk.Tk):
     def __init__(self):
@@ -120,7 +141,9 @@ class FixClientSimulator(tk.Tk):
     def get_current_session(self):
         current_tab = self.notebook.select()
         if current_tab:
-            return next(s for s in self.sessions if s.frame.winfo_id() == int(current_tab.split('.')[-1]))
+            for session in self.sessions:
+                if session.frame.winfo_id() == int(current_tab.split('.')[-1]):
+                    return session
         return None
 
     def on_tab_changed(self, event):
@@ -128,6 +151,9 @@ class FixClientSimulator(tk.Tk):
 
     def show_connection_dialog(self):
         session = self.get_current_session()
+        if not session:
+            return
+
         dialog = tk.Toplevel(self)
         dialog.title("Connect to Server")
 
@@ -157,23 +183,6 @@ class FixClientSimulator(tk.Tk):
             threading.Thread(target=lambda: self.receive_messages(session), daemon=True).start()
         except Exception as e:
             messagebox.showerror("Connection Error", f"Could not connect: {e}")
-
-    def send_message(self):
-        session = self.get_current_session()
-        if not session or not session.connected:
-            return
-
-        msg = f"Symbol={session.symbol_entry.get()};Price={session.price_entry.get()};" \
-              f"Qty={session.qty_entry.get()};OrderType={session.ordertype_entry.get()}"
-        
-        try:
-            session.client_socket.sendall(msg.encode())
-            session.symbol_entry.delete(0, tk.END)
-            session.price_entry.delete(0, tk.END)
-            session.qty_entry.delete(0, tk.END)
-            session.ordertype_entry.delete(0, tk.END)
-        except Exception as e:
-            messagebox.showerror("Send Error", f"Failed to send message: {e}")
 
     def receive_messages(self, session):
         while session.connected:
