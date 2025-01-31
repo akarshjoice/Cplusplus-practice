@@ -88,14 +88,15 @@ class FixClientSimulator(tk.Frame):
         self.master.after(100, self.process_messages)
 
     def setup_ui(self):
-        self.grid(row=0, column=0, sticky="nsew")
+        # Use pack manager for the main frame
+        self.pack(fill="both", expand=True)
         self.master.rowconfigure(0, weight=1)
         self.master.columnconfigure(0, weight=1)
 
     def setup_scrollable_notebook(self):
         # Create container for notebook and scrollbar
-        self.nb_container = ttk.Frame(self.master)
-        self.nb_container.grid(row=1, column=0, sticky="nsew")
+        self.nb_container = ttk.Frame(self)
+        self.nb_container.pack(fill="both", expand=True)
 
         # Horizontal scrollbar
         self.nb_scroll = ttk.Scrollbar(self.nb_container, orient="horizontal")
@@ -247,5 +248,4 @@ if __name__ == "__main__":
     root = tk.Tk()
     root.geometry("800x600")
     app = FixClientSimulator(master=root)
-    app.pack(fill="both", expand=True)
     root.mainloop()
