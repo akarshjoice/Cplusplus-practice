@@ -5,23 +5,33 @@ import threading
 import queue
 
 class Session:
-    def __init__(self, name, host, port, log_callback):
+    def __init__(self, name, host, port, protocol, log_callback):
         self.name = name
         self.host = host
         self.port = port
+        self.protocol = protocol
         self.socket = None
         self.message_queue = queue.Queue()
         self.receive_thread = None
         self.connected = False
-        self.log_callback = log_callback  # This callback is now thread-safe
+        self.log_callback = log_callback
 
     def connect(self):
         try:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.connect((self.host, self.port))
+            if self.protocol == "TCP":
+                self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.socket.connect((self.host, self.port))
+            else:  # UDP
+                self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            
             self.connected = True
-            self.log_callback(self.name, f"Connected to {self.host}:{self.port}")
-            self.receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
+            self.log_callback(self.name, f"Connected via {self.protocol} to {self.host}:{self.port}")
+            
+            if self.protocol == "TCP":
+                self.receive_thread = threading.Thread(target=self.receive_tcp_messages, daemon=True)
+            else:
+                self.receive_thread = threading.Thread(target=self.receive_udp_messages, daemon=True)
+                
             self.receive_thread.start()
         except Exception as e:
             self.log_callback(self.name, f"Error connecting: {e}")
@@ -29,21 +39,33 @@ class Session:
     def send_message(self, message):
         if self.socket and self.connected:
             try:
-                self.socket.sendall(message.encode())
-                self.log_callback(self.name, f"Sent: {message}")
+                if self.protocol == "TCP":
+                    self.socket.sendall(message.encode())
+                else:
+                    self.socket.sendto(message.encode(), (self.host, self.port))
+                self.log_callback(self.name, f"Sent via {self.protocol}: {message}")
             except Exception as e:
                 self.log_callback(self.name, f"Error sending message: {e}")
 
-    def receive_messages(self):
+    def receive_tcp_messages(self):
         while self.connected:
             try:
                 data = self.socket.recv(1024).decode()
                 if data:
                     self.message_queue.put(data)
             except Exception as e:
-                self.log_callback(self.name, f"Error receiving message: {e}")
+                self.log_callback(self.name, f"Connection error: {e}")
                 self.connected = False
                 break
+
+    def receive_udp_messages(self):
+        while self.connected:
+            try:
+                data, addr = self.socket.recvfrom(1024)
+                if data:
+                    self.message_queue.put(data.decode())
+            except Exception as e:
+                self.log_callback(self.name, f"Receive error: {e}")
 
     def get_next_message(self):
         try:
@@ -56,85 +78,140 @@ class FixClientSimulator(tk.Frame):
         super().__init__(master)
         self.master = master
         master.title("FIX Client Simulator")
-
         self.sessions = {}
         self.session_logs = {}
 
         self.setup_ui()
         self.setup_menu()
-
-        self.master.after(500, self.process_active_session_messages)
-        self.master.after(2000, self.process_all_session_messages)
+        self.setup_scrollable_notebook()
+        
+        self.master.after(100, self.process_messages)
 
     def setup_ui(self):
         self.grid(row=0, column=0, sticky="nsew")
         self.master.rowconfigure(0, weight=1)
         self.master.columnconfigure(0, weight=1)
 
-        self.notebook = ttk.Notebook(self.master)
-        self.notebook.grid(row=1, column=0, sticky="nsew")
+    def setup_scrollable_notebook(self):
+        # Create container for notebook and scrollbar
+        self.nb_container = ttk.Frame(self.master)
+        self.nb_container.grid(row=1, column=0, sticky="nsew")
+
+        # Horizontal scrollbar
+        self.nb_scroll = ttk.Scrollbar(self.nb_container, orient="horizontal")
+        self.nb_scroll.pack(side="bottom", fill="x")
+
+        # Canvas for scrollable notebook
+        self.nb_canvas = tk.Canvas(self.nb_container, xscrollcommand=self.nb_scroll.set)
+        self.nb_canvas.pack(side="top", fill="both", expand=True)
+
+        # Configure scrollbar
+        self.nb_scroll.config(command=self.nb_canvas.xview)
+
+        # Notebook frame inside canvas
+        self.nb_frame = ttk.Frame(self.nb_canvas)
+        self.nb_canvas.create_window((0, 0), window=self.nb_frame, anchor="nw")
+
+        # Actual notebook
+        self.notebook = ttk.Notebook(self.nb_frame)
+        self.notebook.pack(fill="both", expand=True)
+
+        # Event bindings
+        self.nb_frame.bind("<Configure>", lambda e: self.nb_canvas.configure(scrollregion=self.nb_canvas.bbox("all")))
+        self.nb_canvas.bind("<Configure>", self.on_canvas_configure)
+        self.nb_canvas.bind("<Shift-MouseWheel>", lambda e: self.nb_canvas.xview_scroll(-1*(e.delta//120), "units"))
+
+    def on_canvas_configure(self, event):
+        self.nb_canvas.itemconfig(self.nb_frame, width=event.width)
 
     def setup_menu(self):
         menubar = tk.Menu(self.master)
         self.master.config(menu=menubar)
-
         connection_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Connection", menu=connection_menu)
         connection_menu.add_command(label="Add Session", command=self.show_add_session_dialog)
+        connection_menu.add_command(label="Exit", command=self.master.quit)
 
     def show_add_session_dialog(self):
         dialog = tk.Toplevel(self)
         dialog.title("Add Session")
-        dialog.geometry("300x200")
+        dialog.geometry("300x250")
 
-        tk.Label(dialog, text="Session Name:").pack(pady=5)
-        name_entry = ttk.Entry(dialog)
-        name_entry.pack(pady=5)
+        fields = [
+            ("Session Name:", "entry"),
+            ("Server IP:", "entry"),
+            ("Port:", "entry"),
+            ("Protocol:", "combobox")
+        ]
 
-        tk.Label(dialog, text="Server IP:").pack(pady=5)
-        ip_entry = ttk.Entry(dialog)
-        ip_entry.pack(pady=5)
-
-        tk.Label(dialog, text="Port:").pack(pady=5)
-        port_entry = ttk.Entry(dialog)
-        port_entry.pack(pady=5)
+        entries = {}
+        for i, (label, field_type) in enumerate(fields):
+            tk.Label(dialog, text=label).pack(pady=2)
+            if field_type == "entry":
+                entry = ttk.Entry(dialog)
+                entry.pack(pady=2)
+                entries[label] = entry
+            elif field_type == "combobox":
+                combo = ttk.Combobox(dialog, values=["TCP", "UDP"], state="readonly")
+                combo.set("TCP")
+                combo.pack(pady=2)
+                entries[label] = combo
 
         def add_session():
-            name = name_entry.get().strip()
-            ip = ip_entry.get().strip()
-            port = port_entry.get().strip()
+            try:
+                name = entries["Session Name:"].get().strip()
+                ip = entries["Server IP:"].get().strip()
+                port = entries["Port:"].get().strip()
+                protocol = entries["Protocol:"].get().strip()
 
-            if not name or not ip or not port.isdigit():
-                messagebox.showerror("Error", "Invalid input")
-                return
+                if not all([name, ip, port, protocol]):
+                    raise ValueError("All fields are required")
+                if not port.isdigit():
+                    raise ValueError("Invalid port number")
+                if name in self.sessions:
+                    raise ValueError("Session name already exists")
 
-            port = int(port)
-            if name in self.sessions:
-                messagebox.showerror("Error", "Session already exists")
-                return
+                port = int(port)
+                log_callback = lambda sn, msg: self.master.after(0, self.log_message, sn, msg)
+                session = Session(name, ip, port, protocol, log_callback)
+                session.connect()
+                self.sessions[name] = session
 
-            # Wrap log_callback to ensure it's executed in the main thread
-            log_callback = lambda sn, msg: self.master.after(0, self.log_message, sn, msg)
-            session = Session(name, ip, port, log_callback)
-            session.connect()
-            self.sessions[name] = session
+                frame, log_widget = self.create_session_tab(name)
+                self.notebook.add(frame, text=name)
+                self.session_logs[name] = log_widget
+                dialog.destroy()
 
-            frame, log_widget = self.create_session_tab(name)
-            self.notebook.add(frame, text=name)
-            self.notebook.select(frame)
-            self.session_logs[name] = log_widget
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
 
-            dialog.destroy()
-
-        ttk.Button(dialog, text="Add", command=add_session).pack(pady=10)
+        ttk.Button(dialog, text="Add Session", command=add_session).pack(pady=10)
 
     def create_session_tab(self, session_name):
         frame = ttk.Frame(self.notebook)
+        
+        # Scrollable text area
+        text_container = ttk.Frame(frame)
+        text_container.pack(fill="both", expand=True, padx=5, pady=5)
 
-        message_log_frame = ttk.Labelframe(frame, text="Message Log")
-        message_log_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        message_log_text = tk.Text(message_log_frame, height=10, wrap="word", state="disabled")
-        message_log_text.pack(fill="both", expand=True)
+        text_scroll = ttk.Scrollbar(text_container)
+        text_scroll.pack(side="right", fill="y")
+
+        message_log_text = tk.Text(text_container, wrap="word", yscrollcommand=text_scroll.set, state="disabled")
+        message_log_text.pack(side="left", fill="both", expand=True)
+        
+        text_scroll.config(command=message_log_text.yview)
+
+        # Message entry and send button
+        input_frame = ttk.Frame(frame)
+        input_frame.pack(fill="x", padx=5, pady=5)
+        
+        self.message_entry = ttk.Entry(input_frame)
+        self.message_entry.pack(side="left", fill="x", expand=True)
+        
+        send_button = ttk.Button(input_frame, text="Send", 
+                               command=lambda: self.send_message(session_name))
+        send_button.pack(side="right", padx=5)
 
         return frame, message_log_text
 
@@ -146,44 +223,29 @@ class FixClientSimulator(tk.Frame):
             log_widget.config(state="disabled")
             log_widget.yview("end")
 
-    def get_active_session(self):
-        selected_tab = self.notebook.select()
-        return self.notebook.tab(selected_tab, "text") if selected_tab else None
-
-    def process_active_session_messages(self):
-        active_session_name = self.get_active_session()
-        if active_session_name and active_session_name in self.sessions:
-            session = self.sessions[active_session_name]
+    def process_messages(self):
+        for session_name, session in self.sessions.items():
             while True:
                 message = session.get_next_message()
                 if not message:
                     break
-                self.log_message(active_session_name, f"Received: {message}")
+                self.log_message(session_name, f"Received ({session.protocol}): {message}")
+        
+        self.master.after(100, self.process_messages)
 
-        self.master.after(500, self.process_active_session_messages)
-
-    def process_all_session_messages(self):
-        for session_name, session in self.sessions.items():
-            if session_name != self.get_active_session():
-                while True:
-                    message = session.get_next_message()
-                    if not message:
-                        break
-                    self.log_message(session_name, f"Received: {message}")
-
-        self.master.after(2000, self.process_all_session_messages)
-
-    def send_fix_message(self):
-        session_name = self.get_active_session()
-        if not session_name or session_name not in self.sessions:
-            messagebox.showerror("Error", "No active session selected")
+    def send_message(self, session_name):
+        if session_name not in self.sessions:
+            messagebox.showerror("Error", "Session not found")
             return
-
-        message = "Sample FIX Message"
-        self.sessions[session_name].send_message(message)
+        
+        message = self.message_entry.get()
+        if message:
+            self.sessions[session_name].send_message(message)
+            self.message_entry.delete(0, "end")
 
 if __name__ == "__main__":
     root = tk.Tk()
+    root.geometry("800x600")
     app = FixClientSimulator(master=root)
     app.pack(fill="both", expand=True)
     root.mainloop()
