@@ -5,206 +5,185 @@ import threading
 import queue
 
 class Session:
-    def __init__(self, master, tab_name):
-        self.master = master
-        self.tab_name = tab_name
-        self.frame = ttk.Frame(master)
-        self.client_socket = None
+    def __init__(self, name, host, port, log_callback):
+        self.name = name
+        self.host = host
+        self.port = port
+        self.socket = None
         self.message_queue = queue.Queue()
-        self.host = 'localhost'
-        self.port = 5000
+        self.receive_thread = None
         self.connected = False
-        
-        # GUI components
-        self.symbol_entry = ttk.Entry()
-        self.price_entry = ttk.Entry()
-        self.qty_entry = ttk.Entry()
-        self.ordertype_entry = ttk.Entry()
-        self.message_info_text = tk.Text()
-        self.order_tree = ttk.Treeview()
-        self.order_transactions_list = tk.Listbox()
-        
-        self.setup_ui()
+        self.log_callback = log_callback  # This callback is now thread-safe
 
-    def setup_ui(self):
-        # Main container
-        main_frame = ttk.Frame(self.frame)
-        main_frame.pack(fill='both', expand=True)
-
-        # Left panel
-        left_panel = ttk.Frame(main_frame)
-        left_panel.pack(side='left', fill='both', expand=True)
-
-        # Order Tree
-        order_tree_frame = ttk.Labelframe(left_panel, text="Order Details")
-        order_tree_frame.pack(fill='both', expand=True)
-
-        self.order_tree = ttk.Treeview(order_tree_frame, columns=("clordid", "price", "quantity", "messagetype"), show="headings")
-        self.order_tree.heading("clordid", text="ClOrdID")
-        self.order_tree.heading("price", text="Price")
-        self.order_tree.heading("quantity", text="Quantity")
-        self.order_tree.heading("messagetype", text="MessageType")
-        self.order_tree.pack(side='left', fill='both', expand=True)
-
-        # Transactions List
-        transactions_frame = ttk.Labelframe(left_panel, text="Order Transactions")
-        transactions_frame.pack(fill='both', expand=True)
-
-        self.order_transactions_list = tk.Listbox(transactions_frame)
-        self.order_transactions_list.pack(fill='both', expand=True)
-
-        # FIX Fields
-        fields_frame = ttk.Labelframe(left_panel, text="FIX Fields")
-        fields_frame.pack(fill='x')
-
-        ttk.Label(fields_frame, text="Symbol:").grid(row=0, column=0, padx=5, pady=5)
-        self.symbol_entry = ttk.Entry(fields_frame)
-        self.symbol_entry.grid(row=0, column=1, padx=5, pady=5)
-
-        ttk.Label(fields_frame, text="Price:").grid(row=1, column=0, padx=5, pady=5)
-        self.price_entry = ttk.Entry(fields_frame)
-        self.price_entry.grid(row=1, column=1, padx=5, pady=5)
-
-        ttk.Label(fields_frame, text="Qty:").grid(row=2, column=0, padx=5, pady=5)
-        self.qty_entry = ttk.Entry(fields_frame)
-        self.qty_entry.grid(row=2, column=1, padx=5, pady=5)
-
-        ttk.Label(fields_frame, text="OrderType:").grid(row=3, column=0, padx=5, pady=5)
-        self.ordertype_entry = ttk.Entry(fields_frame)
-        self.ordertype_entry.grid(row=3, column=1, padx=5, pady=5)
-
-        send_btn = ttk.Button(fields_frame, text="Send", command=self.send_message)
-        send_btn.grid(row=4, columnspan=2, pady=10)
-
-        # Right panel
-        right_panel = ttk.Frame(main_frame)
-        right_panel.pack(side='right', fill='both', expand=True)
-
-        # Message Info
-        message_frame = ttk.Labelframe(right_panel, text="Message Info")
-        message_frame.pack(fill='both', expand=True)
-
-        self.message_info_text = tk.Text(message_frame, wrap='word')
-        self.message_info_text.pack(fill='both', expand=True)
-
-    def send_message(self):
-        if not self.connected:
-            return
-
-        msg = (f"Symbol={self.symbol_entry.get()};"
-               f"Price={self.price_entry.get()};"
-               f"Qty={self.qty_entry.get()};"
-               f"OrderType={self.ordertype_entry.get()}")
-        
+    def connect(self):
         try:
-            self.client_socket.sendall(msg.encode())
-            self.symbol_entry.delete(0, tk.END)
-            self.price_entry.delete(0, tk.END)
-            self.qty_entry.delete(0, tk.END)
-            self.ordertype_entry.delete(0, tk.END)
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.connect((self.host, self.port))
+            self.connected = True
+            self.log_callback(self.name, f"Connected to {self.host}:{self.port}")
+            self.receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
+            self.receive_thread.start()
         except Exception as e:
-            messagebox.showerror("Send Error", f"Failed to send message: {e}")
+            self.log_callback(self.name, f"Error connecting: {e}")
 
-class FixClientSimulator(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("FIX Client Simulator")
-        self.sessions = []
-        self.current_session = None
-        
-        self.setup_menu()
-        self.setup_notebook()
-        self.add_session()
-        self.process_queue()
-
-    def setup_menu(self):
-        menubar = tk.Menu(self)
-        self.config(menu=menubar)
-
-        connection_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Session", menu=connection_menu)
-        connection_menu.add_command(label="New Session", command=self.add_session)
-        connection_menu.add_command(label="Connect", command=self.show_connection_dialog)
-
-    def setup_notebook(self):
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill='both', expand=True)
-        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
-
-    def add_session(self):
-        session_num = len(self.sessions) + 1
-        session = Session(self.notebook, f"Session {session_num}")
-        self.sessions.append(session)
-        self.notebook.add(session.frame, text=session.tab_name)
-        self.notebook.select(session.frame)
-
-    def get_current_session(self):
-        current_tab = self.notebook.select()
-        if current_tab:
-            for session in self.sessions:
-                if session.frame.winfo_id() == int(current_tab.split('.')[-1]):
-                    return session
-        return None
-
-    def on_tab_changed(self, event):
-        self.current_session = self.get_current_session()
-
-    def show_connection_dialog(self):
-        session = self.get_current_session()
-        if not session:
-            return
-
-        dialog = tk.Toplevel(self)
-        dialog.title("Connect to Server")
-
-        ttk.Label(dialog, text="Server IP:").grid(row=0, column=0, padx=5, pady=5)
-        ip_entry = ttk.Entry(dialog)
-        ip_entry.insert(0, session.host)
-        ip_entry.grid(row=0, column=1, padx=5, pady=5)
-
-        ttk.Label(dialog, text="Port:").grid(row=1, column=0, padx=5, pady=5)
-        port_entry = ttk.Entry(dialog)
-        port_entry.insert(0, str(session.port))
-        port_entry.grid(row=1, column=1, padx=5, pady=5)
-
-        def connect():
-            session.host = ip_entry.get()
-            session.port = int(port_entry.get())
-            self.connect_to_server(session)
-            dialog.destroy()
-
-        ttk.Button(dialog, text="Connect", command=connect).grid(row=2, columnspan=2, pady=10)
-
-    def connect_to_server(self, session):
-        try:
-            session.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            session.client_socket.connect((session.host, session.port))
-            session.connected = True
-            threading.Thread(target=lambda: self.receive_messages(session), daemon=True).start()
-        except Exception as e:
-            messagebox.showerror("Connection Error", f"Could not connect: {e}")
-
-    def receive_messages(self, session):
-        while session.connected:
+    def send_message(self, message):
+        if self.socket and self.connected:
             try:
-                data = session.client_socket.recv(1024).decode()
-                if data:
-                    session.message_queue.put(data)
-                else:
-                    break
+                self.socket.sendall(message.encode())
+                self.log_callback(self.name, f"Sent: {message}")
             except Exception as e:
-                print(f"Receive error: {e}")
-                session.connected = False
+                self.log_callback(self.name, f"Error sending message: {e}")
+
+    def receive_messages(self):
+        while self.connected:
+            try:
+                data = self.socket.recv(1024).decode()
+                if data:
+                    self.message_queue.put(data)
+            except Exception as e:
+                self.log_callback(self.name, f"Error receiving message: {e}")
+                self.connected = False
                 break
 
-    def process_queue(self):
-        for session in self.sessions:
-            while not session.message_queue.empty():
-                msg = session.message_queue.get()
-                session.message_info_text.insert(tk.END, msg + "\n")
-                session.message_info_text.see(tk.END)
-        self.after(100, self.process_queue)
+    def get_next_message(self):
+        try:
+            return self.message_queue.get_nowait()
+        except queue.Empty:
+            return None
+
+class FixClientSimulator(tk.Frame):
+    def __init__(self, master=None):
+        super().__init__(master)
+        self.master = master
+        master.title("FIX Client Simulator")
+
+        self.sessions = {}
+        self.session_logs = {}
+
+        self.setup_ui()
+        self.setup_menu()
+
+        self.master.after(500, self.process_active_session_messages)
+        self.master.after(2000, self.process_all_session_messages)
+
+    def setup_ui(self):
+        self.grid(row=0, column=0, sticky="nsew")
+        self.master.rowconfigure(0, weight=1)
+        self.master.columnconfigure(0, weight=1)
+
+        self.notebook = ttk.Notebook(self.master)
+        self.notebook.grid(row=1, column=0, sticky="nsew")
+
+    def setup_menu(self):
+        menubar = tk.Menu(self.master)
+        self.master.config(menu=menubar)
+
+        connection_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Connection", menu=connection_menu)
+        connection_menu.add_command(label="Add Session", command=self.show_add_session_dialog)
+
+    def show_add_session_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Add Session")
+        dialog.geometry("300x200")
+
+        tk.Label(dialog, text="Session Name:").pack(pady=5)
+        name_entry = ttk.Entry(dialog)
+        name_entry.pack(pady=5)
+
+        tk.Label(dialog, text="Server IP:").pack(pady=5)
+        ip_entry = ttk.Entry(dialog)
+        ip_entry.pack(pady=5)
+
+        tk.Label(dialog, text="Port:").pack(pady=5)
+        port_entry = ttk.Entry(dialog)
+        port_entry.pack(pady=5)
+
+        def add_session():
+            name = name_entry.get().strip()
+            ip = ip_entry.get().strip()
+            port = port_entry.get().strip()
+
+            if not name or not ip or not port.isdigit():
+                messagebox.showerror("Error", "Invalid input")
+                return
+
+            port = int(port)
+            if name in self.sessions:
+                messagebox.showerror("Error", "Session already exists")
+                return
+
+            # Wrap log_callback to ensure it's executed in the main thread
+            log_callback = lambda sn, msg: self.master.after(0, self.log_message, sn, msg)
+            session = Session(name, ip, port, log_callback)
+            session.connect()
+            self.sessions[name] = session
+
+            frame, log_widget = self.create_session_tab(name)
+            self.notebook.add(frame, text=name)
+            self.notebook.select(frame)
+            self.session_logs[name] = log_widget
+
+            dialog.destroy()
+
+        ttk.Button(dialog, text="Add", command=add_session).pack(pady=10)
+
+    def create_session_tab(self, session_name):
+        frame = ttk.Frame(self.notebook)
+
+        message_log_frame = ttk.Labelframe(frame, text="Message Log")
+        message_log_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        message_log_text = tk.Text(message_log_frame, height=10, wrap="word", state="disabled")
+        message_log_text.pack(fill="both", expand=True)
+
+        return frame, message_log_text
+
+    def log_message(self, session_name, message):
+        if session_name in self.session_logs:
+            log_widget = self.session_logs[session_name]
+            log_widget.config(state="normal")
+            log_widget.insert("end", message + "\n")
+            log_widget.config(state="disabled")
+            log_widget.yview("end")
+
+    def get_active_session(self):
+        selected_tab = self.notebook.select()
+        return self.notebook.tab(selected_tab, "text") if selected_tab else None
+
+    def process_active_session_messages(self):
+        active_session_name = self.get_active_session()
+        if active_session_name and active_session_name in self.sessions:
+            session = self.sessions[active_session_name]
+            while True:
+                message = session.get_next_message()
+                if not message:
+                    break
+                self.log_message(active_session_name, f"Received: {message}")
+
+        self.master.after(500, self.process_active_session_messages)
+
+    def process_all_session_messages(self):
+        for session_name, session in self.sessions.items():
+            if session_name != self.get_active_session():
+                while True:
+                    message = session.get_next_message()
+                    if not message:
+                        break
+                    self.log_message(session_name, f"Received: {message}")
+
+        self.master.after(2000, self.process_all_session_messages)
+
+    def send_fix_message(self):
+        session_name = self.get_active_session()
+        if not session_name or session_name not in self.sessions:
+            messagebox.showerror("Error", "No active session selected")
+            return
+
+        message = "Sample FIX Message"
+        self.sessions[session_name].send_message(message)
 
 if __name__ == "__main__":
-    app = FixClientSimulator()
-    app.mainloop()
+    root = tk.Tk()
+    app = FixClientSimulator(master=root)
+    app.pack(fill="both", expand=True)
+    root.mainloop()
