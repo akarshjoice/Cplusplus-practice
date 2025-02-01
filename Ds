@@ -5,7 +5,7 @@ import threading
 import queue
 
 class Session:
-    def __init__(self, name, host, port, protocol, log_callback):
+    def __init__(self, name, host, port, protocol, log_callback, status_callback):
         self.name = name
         self.host = host
         self.port = port
@@ -15,6 +15,7 @@ class Session:
         self.receive_thread = None
         self.connected = False
         self.log_callback = log_callback
+        self.status_callback = status_callback
 
     def connect(self):
         try:
@@ -26,6 +27,7 @@ class Session:
             
             self.connected = True
             self.log_callback(self.name, f"Connected via {self.protocol} to {self.host}:{self.port}")
+            self.status_callback(self.name, self.connected)
             
             if self.protocol == "TCP":
                 self.receive_thread = threading.Thread(target=self.receive_tcp_messages, daemon=True)
@@ -35,6 +37,8 @@ class Session:
             self.receive_thread.start()
         except Exception as e:
             self.log_callback(self.name, f"Error connecting: {e}")
+            self.connected = False
+            self.status_callback(self.name, self.connected)
 
     def send_message(self, message):
         if self.socket and self.connected:
@@ -46,6 +50,8 @@ class Session:
                 self.log_callback(self.name, f"Sent via {self.protocol}: {message}")
             except Exception as e:
                 self.log_callback(self.name, f"Error sending message: {e}")
+                self.connected = False
+                self.status_callback(self.name, self.connected)
 
     def receive_tcp_messages(self):
         while self.connected:
@@ -56,6 +62,7 @@ class Session:
             except Exception as e:
                 self.log_callback(self.name, f"Connection error: {e}")
                 self.connected = False
+                self.status_callback(self.name, self.connected)
                 break
 
     def receive_udp_messages(self):
@@ -66,6 +73,8 @@ class Session:
                     self.message_queue.put(data.decode())
             except Exception as e:
                 self.log_callback(self.name, f"Receive error: {e}")
+                self.connected = False
+                self.status_callback(self.name, self.connected)
 
     def get_next_message(self):
         try:
@@ -83,47 +92,35 @@ class FixClientSimulator(tk.Frame):
 
         self.setup_ui()
         self.setup_menu()
-        self.setup_scrollable_notebook()
+        self.setup_styles()
         
         self.master.after(100, self.process_messages)
 
     def setup_ui(self):
-        # Use pack manager for the main frame
         self.pack(fill="both", expand=True)
-        self.master.rowconfigure(0, weight=1)
-        self.master.columnconfigure(0, weight=1)
+        
+        # Create notebook with styled tabs
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
 
-    def setup_scrollable_notebook(self):
-        # Create container for notebook and scrollbar
-        self.nb_container = ttk.Frame(self)
-        self.nb_container.pack(fill="both", expand=True)
-
-        # Horizontal scrollbar
-        self.nb_scroll = ttk.Scrollbar(self.nb_container, orient="horizontal")
-        self.nb_scroll.pack(side="bottom", fill="x")
-
-        # Canvas for scrollable notebook
-        self.nb_canvas = tk.Canvas(self.nb_container, xscrollcommand=self.nb_scroll.set)
-        self.nb_canvas.pack(side="top", fill="both", expand=True)
-
-        # Configure scrollbar
-        self.nb_scroll.config(command=self.nb_canvas.xview)
-
-        # Notebook frame inside canvas
-        self.nb_frame = ttk.Frame(self.nb_canvas)
-        self.nb_canvas.create_window((0, 0), window=self.nb_frame, anchor="nw")
-
-        # Actual notebook
-        self.notebook = ttk.Notebook(self.nb_frame)
-        self.notebook.pack(fill="both", expand=True)
-
-        # Event bindings
-        self.nb_frame.bind("<Configure>", lambda e: self.nb_canvas.configure(scrollregion=self.nb_canvas.bbox("all")))
-        self.nb_canvas.bind("<Configure>", self.on_canvas_configure)
-        self.nb_canvas.bind("<Shift-MouseWheel>", lambda e: self.nb_canvas.xview_scroll(-1*(e.delta//120), "units"))
-
-    def on_canvas_configure(self, event):
-        self.nb_canvas.itemconfig(self.nb_frame, width=event.width)
+    def setup_styles(self):
+        style = ttk.Style()
+        style.theme_use('clam')  # Use a theme that supports tab coloring
+        
+        # Configure normal tab appearance
+        style.configure("TNotebook.Tab", padding=(10, 5))
+        
+        # Connected tab style (green)
+        style.configure("Connected.TNotebook.Tab", 
+                      background="#d0f0d0",
+                      foreground="#004400",
+                      font=('Helvetica', 10, 'bold'))
+        
+        # Disconnected tab style (red)
+        style.configure("Disconnected.TNotebook.Tab", 
+                      background="#f0d0d0",
+                      foreground="#440000",
+                      font=('Helvetica', 10, 'bold'))
 
     def setup_menu(self):
         menubar = tk.Menu(self.master)
@@ -174,13 +171,15 @@ class FixClientSimulator(tk.Frame):
 
                 port = int(port)
                 log_callback = lambda sn, msg: self.master.after(0, self.log_message, sn, msg)
-                session = Session(name, ip, port, protocol, log_callback)
-                session.connect()
+                status_callback = lambda sn, status: self.master.after(0, self.update_tab_style, sn, status)
+                session = Session(name, ip, port, protocol, log_callback, status_callback)
                 self.sessions[name] = session
 
                 frame, log_widget = self.create_session_tab(name)
                 self.notebook.add(frame, text=name)
                 self.session_logs[name] = log_widget
+                self.update_tab_style(name, session.connected)
+                session.connect()
                 dialog.destroy()
 
             except Exception as e:
@@ -191,30 +190,34 @@ class FixClientSimulator(tk.Frame):
     def create_session_tab(self, session_name):
         frame = ttk.Frame(self.notebook)
         
-        # Scrollable text area
-        text_container = ttk.Frame(frame)
-        text_container.pack(fill="both", expand=True, padx=5, pady=5)
+        # Message log with scrollbar
+        log_frame = ttk.Frame(frame)
+        log_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
-        text_scroll = ttk.Scrollbar(text_container)
-        text_scroll.pack(side="right", fill="y")
+        scrollbar = ttk.Scrollbar(log_frame)
+        scrollbar.pack(side="right", fill="y")
 
-        message_log_text = tk.Text(text_container, wrap="word", yscrollcommand=text_scroll.set, state="disabled")
-        message_log_text.pack(side="left", fill="both", expand=True)
-        
-        text_scroll.config(command=message_log_text.yview)
+        log_text = tk.Text(log_frame, wrap="word", yscrollcommand=scrollbar.set, state="disabled")
+        log_text.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=log_text.yview)
 
-        # Message entry and send button
+        # Message entry area
         input_frame = ttk.Frame(frame)
         input_frame.pack(fill="x", padx=5, pady=5)
-        
+
         self.message_entry = ttk.Entry(input_frame)
-        self.message_entry.pack(side="left", fill="x", expand=True)
-        
+        self.message_entry.pack(side="left", fill="x", expand=True, padx=2)
+
         send_button = ttk.Button(input_frame, text="Send", 
                                command=lambda: self.send_message(session_name))
-        send_button.pack(side="right", padx=5)
+        send_button.pack(side="right", padx=2)
 
-        return frame, message_log_text
+        return frame, log_text
+
+    def update_tab_style(self, session_name, connected):
+        if session_name in self.sessions:
+            style = "Connected.TNotebook.Tab" if connected else "Disconnected.TNotebook.Tab"
+            self.notebook.tab(session_name, style=style)
 
     def log_message(self, session_name, message):
         if session_name in self.session_logs:
