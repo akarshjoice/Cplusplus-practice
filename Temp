@@ -7,20 +7,20 @@ class FixClientSimulator(tk.Frame):
         self.master = master
         master.title("FIX Client Simulator")
 
-        # Dictionary to track session states
-        self.sessions = {}
-
         # Create a ttk Style object to change tab text color
         self.style = ttk.Style()
         self.style.configure("Connected.TNotebook.Tab", foreground="green")  # Green color for connected
         self.style.configure("Disconnected.TNotebook.Tab", foreground="red")  # Red color for disconnected
 
         # Notebook for multiple sessions
-        self.notebook = ttk.Notebook(self.master, style="TNotebook")
+        self.notebook = ttk.Notebook(self.master)
         self.notebook.pack(fill="both", expand=True)
 
         # Menu bar
         self.setup_menu()
+
+        # Session tracking
+        self.sessions = {}
 
     def setup_menu(self):
         """Creates the menu bar."""
