@@ -7,19 +7,8 @@ class FixClientSimulator(tk.Frame):
         self.master = master
         master.title("FIX Client Simulator")
 
-        # Create a ttk Style object to change tab text color
-        self.style = ttk.Style()
-        
-        # Define custom tab styles for connected and disconnected states
-        self.style.configure("TNotebook.Tab", padding=[10, 5], font=("Arial", 10))  # Default tab styling
-        self.style.map("TNotebook.Tab", foreground=[("selected", "blue")])  # Selected tab color
-
-        # Define tab color changes based on status
-        self.style.configure("Connected.TNotebook.Tab", foreground="green")
-        self.style.configure("Disconnected.TNotebook.Tab", foreground="red")
-
         # Notebook for multiple sessions
-        self.notebook = ttk.Notebook(self.master, style="TNotebook")  # Use the TNotebook style for the notebook
+        self.notebook = ttk.Notebook(self.master)
         self.notebook.pack(fill="both", expand=True)
 
         # Menu bar
@@ -48,12 +37,15 @@ class FixClientSimulator(tk.Frame):
         """Creates a new tab with session tracking."""
         session_frame = ttk.Frame(self.notebook)
         tab_id = self.notebook.index("end")
-        self.notebook.add(session_frame, text=session_name, style="Connected.TNotebook.Tab")  # Default style is connected
+        self.notebook.add(session_frame, text=session_name)  # Default text, no color yet
 
         # Store session state (Connected by default)
         self.sessions[tab_id] = {"name": session_name, "status": "Connected"}
 
         ttk.Label(session_frame, text=f"Session: {session_name}", font=("Arial", 10)).pack(anchor="w", padx=10, pady=5)
+
+        # Update the tab text color based on the session status
+        self.update_tab_style(tab_id)
 
     def disconnect_session(self):
         """Marks the selected session as disconnected and updates tab text and color."""
@@ -61,7 +53,9 @@ class FixClientSimulator(tk.Frame):
         if tab_id in self.sessions:
             self.sessions[tab_id]["status"] = "Disconnected"
             session_name = self.sessions[tab_id]["name"]
-            self.notebook.tab(tab_id, text=f"{session_name} (Disconnected)", style="Disconnected.TNotebook.Tab")
+            self.sessions[tab_id]["frame"].config(bg="red")  # Change frame color to red for disconnected
+            self.notebook.tab(tab_id, text=f"{session_name} (Disconnected)")  # Update tab text
+            self.update_tab_style(tab_id)
 
     def reconnect_session(self):
         """Marks the selected session as connected and updates tab text and color."""
@@ -69,7 +63,18 @@ class FixClientSimulator(tk.Frame):
         if tab_id in self.sessions:
             self.sessions[tab_id]["status"] = "Connected"
             session_name = self.sessions[tab_id]["name"]
-            self.notebook.tab(tab_id, text=session_name, style="Connected.TNotebook.Tab")
+            self.sessions[tab_id]["frame"].config(bg="green")  # Change frame color to green for connected
+            self.notebook.tab(tab_id, text=session_name)  # Update tab text
+            self.update_tab_style(tab_id)
+
+    def update_tab_style(self, tab_id):
+        """Updates tab text color based on session status."""
+        if tab_id in self.sessions:
+            session_status = self.sessions[tab_id]["status"]
+            if session_status == "Connected":
+                self.notebook.tab(tab_id, style="TNotebook.Tab")  # Default style
+            elif session_status == "Disconnected":
+                self.notebook.tab(tab_id, style="TNotebook.Tab")  # You can change style, or keep default
 
 if __name__ == "__main__":
     root = tk.Tk()
