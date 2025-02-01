@@ -9,11 +9,13 @@ class FixClientSimulator(tk.Frame):
 
         # Create a ttk Style object to change tab text color
         self.style = ttk.Style()
-        self.style.configure("Connected.TNotebook.Tab", foreground="green")  # Green color for connected
-        self.style.configure("Disconnected.TNotebook.Tab", foreground="red")  # Red color for disconnected
+
+        # Define custom tab styles for connected and disconnected states
+        self.style.configure("Connected.TNotebook.Tab", foreground="green", font=("Arial", 10))
+        self.style.configure("Disconnected.TNotebook.Tab", foreground="red", font=("Arial", 10))
 
         # Notebook for multiple sessions
-        self.notebook = ttk.Notebook(self.master)
+        self.notebook = ttk.Notebook(self.master, style="TNotebook")  # Use the TNotebook style for the notebook
         self.notebook.pack(fill="both", expand=True)
 
         # Menu bar
