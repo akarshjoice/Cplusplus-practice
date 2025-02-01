@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
+from tkinter import PhotoImage
 
 class FixClientSimulator(tk.Frame):
     def __init__(self, master=None):
@@ -11,11 +12,15 @@ class FixClientSimulator(tk.Frame):
         self.notebook = ttk.Notebook(self.master)
         self.notebook.pack(fill="both", expand=True)
 
-        # Menu bar
-        self.setup_menu()
-
         # Session tracking
         self.sessions = {}
+
+        # Load images for tab icons
+        self.connected_icon = PhotoImage(file="connected_icon.png")  # Replace with your image path
+        self.disconnected_icon = PhotoImage(file="disconnected_icon.png")  # Replace with your image path
+
+        # Menu bar
+        self.setup_menu()
 
     def setup_menu(self):
         """Creates the menu bar."""
@@ -37,44 +42,41 @@ class FixClientSimulator(tk.Frame):
         """Creates a new tab with session tracking."""
         session_frame = ttk.Frame(self.notebook)
         tab_id = self.notebook.index("end")
-        self.notebook.add(session_frame, text=session_name)  # Default text, no color yet
+        self.notebook.add(session_frame, text="", image=self.connected_icon)  # Default image (connected)
 
         # Store session state (Connected by default)
         self.sessions[tab_id] = {"name": session_name, "status": "Connected"}
 
-        ttk.Label(session_frame, text=f"Session: {session_name}", font=("Arial", 10)).pack(anchor="w", padx=10, pady=5)
-
-        # Update the tab text color based on the session status
-        self.update_tab_style(tab_id)
+        # Label inside the tab to display session name
+        session_label = ttk.Label(session_frame, text=f"Session: {session_name}", font=("Arial", 10))
+        session_label.pack(anchor="w", padx=10, pady=5)
 
     def disconnect_session(self):
-        """Marks the selected session as disconnected and updates tab text and color."""
+        """Marks the selected session as disconnected and updates tab image."""
         tab_id = self.notebook.index(self.notebook.select())  # Get selected tab index
         if tab_id in self.sessions:
             self.sessions[tab_id]["status"] = "Disconnected"
             session_name = self.sessions[tab_id]["name"]
-            self.sessions[tab_id]["frame"].config(bg="red")  # Change frame color to red for disconnected
-            self.notebook.tab(tab_id, text=f"{session_name} (Disconnected)")  # Update tab text
+            self.notebook.tab(tab_id, text=f"{session_name} (Disconnected)", image=self.disconnected_icon)  # Change image
             self.update_tab_style(tab_id)
 
     def reconnect_session(self):
-        """Marks the selected session as connected and updates tab text and color."""
+        """Marks the selected session as connected and updates tab image."""
         tab_id = self.notebook.index(self.notebook.select())  # Get selected tab index
         if tab_id in self.sessions:
             self.sessions[tab_id]["status"] = "Connected"
             session_name = self.sessions[tab_id]["name"]
-            self.sessions[tab_id]["frame"].config(bg="green")  # Change frame color to green for connected
-            self.notebook.tab(tab_id, text=session_name)  # Update tab text
+            self.notebook.tab(tab_id, text=session_name, image=self.connected_icon)  # Change image back
             self.update_tab_style(tab_id)
 
     def update_tab_style(self, tab_id):
-        """Updates tab text color based on session status."""
+        """Updates tab image based on session status."""
         if tab_id in self.sessions:
             session_status = self.sessions[tab_id]["status"]
             if session_status == "Connected":
-                self.notebook.tab(tab_id, style="TNotebook.Tab")  # Default style
+                self.notebook.tab(tab_id, image=self.connected_icon)
             elif session_status == "Disconnected":
-                self.notebook.tab(tab_id, style="TNotebook.Tab")  # You can change style, or keep default
+                self.notebook.tab(tab_id, image=self.disconnected_icon)
 
 if __name__ == "__main__":
     root = tk.Tk()
