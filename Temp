@@ -1,9 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
-import socket
-import threading
-import queue
-
+from tkinter import ttk
 
 class FixClientSimulator(tk.Frame):
     def __init__(self, master=None):
@@ -11,171 +7,63 @@ class FixClientSimulator(tk.Frame):
         self.master = master
         master.title("FIX Client Simulator")
 
-        # Socket setup
-        self.sessions = {}  # Dictionary to store session data
-        self.current_session = None  # Currently active session
+        # Dictionary to track session states
+        self.sessions = {}
+
+        # Create a ttk Style object to change tab text color
+        self.style = ttk.Style()
+        self.style.configure("Connected.TNotebook.Tab", foreground="green")  # Green color for connected
+        self.style.configure("Disconnected.TNotebook.Tab", foreground="red")  # Red color for disconnected
+
+        # Notebook for multiple sessions
+        self.notebook = ttk.Notebook(self.master, style="TNotebook")
+        self.notebook.pack(fill="both", expand=True)
 
         # Menu bar
         self.setup_menu()
 
-        # GUI elements
-        self.setup_ui()
-
     def setup_menu(self):
+        """Creates the menu bar."""
         menubar = tk.Menu(self.master)
         self.master.config(menu=menubar)
 
-        # Connection menu
-        connection_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Session", menu=connection_menu)
-        connection_menu.add_command(label="New Session", command=self.add_new_session)
-
-    def setup_ui(self):
-        # Layout configuration
-        self.grid(row=0, column=0, sticky="nsew")
-        self.master.rowconfigure(0, weight=1)
-        self.master.columnconfigure(0, weight=1)
-        self.rowconfigure(0, weight=1)
-        self.columnconfigure(0, weight=1)
-
-        # Tab control for sessions (footer)
-        self.notebook = ttk.Notebook(self)
-        self.notebook.grid(row=1, column=0, sticky="ew")
-        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_selected)
+        session_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Session", menu=session_menu)
+        session_menu.add_command(label="Add New Session", command=self.add_new_session)
+        session_menu.add_command(label="Disconnect Session", command=self.disconnect_session)
+        session_menu.add_command(label="Reconnect Session", command=self.reconnect_session)
 
     def add_new_session(self):
-        """Opens a dialog to create a new session."""
-        dialog = tk.Toplevel(self)
-        dialog.title("New Session")
-        dialog.geometry("300x150")
-
-        tk.Label(dialog, text="Session Name:").pack(pady=5)
-        session_entry = ttk.Entry(dialog)
-        session_entry.pack(pady=5)
-
-        def create_session():
-            session_name = session_entry.get().strip()
-            if session_name and session_name not in self.sessions:
-                dialog.destroy()
-                self.create_session_tab(session_name)
-            else:
-                messagebox.showerror("Error", "Invalid or duplicate session name.")
-
-        ttk.Button(dialog, text="Create", command=create_session).pack(pady=10)
+        """Opens a dialog to get session name and user info."""
+        session_name = f"Session {len(self.notebook.tabs()) + 1}"  # Auto-generate a name
+        self.create_session_tab(session_name)
 
     def create_session_tab(self, session_name):
-        """Creates a new tab for the given session name."""
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text=session_name)
+        """Creates a new tab with session tracking."""
+        session_frame = ttk.Frame(self.notebook)
+        tab_id = self.notebook.index("end")
+        self.notebook.add(session_frame, text=session_name, style="Connected.TNotebook.Tab")  # Default style is connected
 
-        # Create session-specific data
-        session_data = {
-            "frame": frame,
-            "host": "localhost",
-            "port": 5000,
-            "socket": None,
-            "queue": queue.Queue(),
-            "order_tree": None,
-            "message_info_text": None,
-            "thread": None
-        }
-        self.sessions[session_name] = session_data
+        # Store session state (Connected by default)
+        self.sessions[tab_id] = {"name": session_name, "status": "Connected"}
 
-        # Build UI inside the tab
-        self.build_session_ui(frame, session_name)
+        ttk.Label(session_frame, text=f"Session: {session_name}", font=("Arial", 10)).pack(anchor="w", padx=10, pady=5)
 
-    def build_session_ui(self, frame, session_name):
-        """Builds the UI for a session tab."""
-        session = self.sessions[session_name]
+    def disconnect_session(self):
+        """Marks the selected session as disconnected and updates tab text and color."""
+        tab_id = self.notebook.index(self.notebook.select())  # Get selected tab index
+        if tab_id in self.sessions:
+            self.sessions[tab_id]["status"] = "Disconnected"
+            session_name = self.sessions[tab_id]["name"]
+            self.notebook.tab(tab_id, text=f"{session_name} (Disconnected)", style="Disconnected.TNotebook.Tab")
 
-        order_tree_frame = ttk.Labelframe(frame, text="Orders")
-        order_tree_frame.pack(fill="both", expand=True)
-
-        session["order_tree"] = ttk.Treeview(order_tree_frame, columns=("clordid", "price", "quantity"), show="headings")
-        session["order_tree"].heading("clordid", text="ClOrdID")
-        session["order_tree"].heading("price", text="Price")
-        session["order_tree"].heading("quantity", text="Quantity")
-        session["order_tree"].pack(fill="both", expand=True)
-
-        message_info_frame = ttk.Labelframe(frame, text="Message Info")
-        message_info_frame.pack(fill="both", expand=True)
-
-        session["message_info_text"] = tk.Text(message_info_frame, height=5, wrap="word")
-        session["message_info_text"].pack(fill="both", expand=True)
-
-        control_frame = ttk.Frame(frame)
-        control_frame.pack(fill="x")
-
-        send_button = ttk.Button(control_frame, text="Send", command=lambda: self.send_message(session_name))
-        send_button.pack(side="right", padx=5, pady=5)
-
-        connect_button = ttk.Button(control_frame, text="Connect", command=lambda: self.connect_to_server(session_name))
-        connect_button.pack(side="right", padx=5, pady=5)
-
-    def on_tab_selected(self, event):
-        """Handles tab switch and updates current session."""
-        selected_tab = self.notebook.select()
-        tab_index = self.notebook.index(selected_tab)
-        session_name = self.notebook.tab(selected_tab, "text")
-        self.current_session = session_name
-        print(f"Switched to session: {session_name}")
-
-    def connect_to_server(self, session_name):
-        """Connects to the server for the selected session."""
-        session = self.sessions.get(session_name)
-        if not session:
-            return
-
-        try:
-            session["socket"] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            session["socket"].connect((session["host"], session["port"]))
-            print(f"Connected to server for session {session_name}")
-            session["thread"] = threading.Thread(target=self.receive_messages, args=(session_name,), daemon=True)
-            session["thread"].start()
-        except Exception as e:
-            messagebox.showerror("Connection Error", f"Could not connect for {session_name}: {e}")
-
-    def send_message(self, session_name):
-        """Sends a FIX message for the selected session."""
-        session = self.sessions.get(session_name)
-        if not session or not session["socket"]:
-            return
-
-        message = f"FIX message from session {session_name}"
-        try:
-            session["socket"].sendall(message.encode())
-        except Exception as e:
-            print(f"Error sending message for {session_name}: {e}")
-
-    def receive_messages(self, session_name):
-        """Receives messages for the selected session."""
-        session = self.sessions.get(session_name)
-        if not session:
-            return
-
-        while True:
-            try:
-                data = session["socket"].recv(1024).decode()
-                if data:
-                    session["queue"].put(data)
-                    self.process_queue(session_name)
-                else:
-                    break
-            except Exception as e:
-                print(f"Error receiving message for {session_name}: {e}")
-                break
-
-    def process_queue(self, session_name):
-        """Processes the message queue for the selected session."""
-        session = self.sessions.get(session_name)
-        if not session:
-            return
-
-        while not session["queue"].empty():
-            data = session["queue"].get()
-            session["message_info_text"].insert(tk.END, data + "\n")
-            session["message_info_text"].see(tk.END)
-
+    def reconnect_session(self):
+        """Marks the selected session as connected and updates tab text and color."""
+        tab_id = self.notebook.index(self.notebook.select())  # Get selected tab index
+        if tab_id in self.sessions:
+            self.sessions[tab_id]["status"] = "Connected"
+            session_name = self.sessions[tab_id]["name"]
+            self.notebook.tab(tab_id, text=session_name, style="Connected.TNotebook.Tab")
 
 if __name__ == "__main__":
     root = tk.Tk()
