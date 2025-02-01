@@ -89,6 +89,7 @@ class FixClientSimulator(tk.Frame):
         master.title("FIX Client Simulator")
         self.sessions = {}
         self.session_logs = {}
+        self.tab_frames = {}
 
         self.setup_ui()
         self.setup_menu()
@@ -98,25 +99,23 @@ class FixClientSimulator(tk.Frame):
 
     def setup_ui(self):
         self.pack(fill="both", expand=True)
-        
-        # Create notebook with styled tabs
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
 
     def setup_styles(self):
         style = ttk.Style()
-        style.theme_use('clam')  # Use a theme that supports tab coloring
+        style.theme_use('clam')
         
-        # Configure normal tab appearance
+        # Base tab style
         style.configure("TNotebook.Tab", padding=(10, 5))
         
-        # Connected tab style (green)
+        # Connected style
         style.configure("Connected.TNotebook.Tab", 
                       background="#d0f0d0",
                       foreground="#004400",
                       font=('Helvetica', 10, 'bold'))
         
-        # Disconnected tab style (red)
+        # Disconnected style
         style.configure("Disconnected.TNotebook.Tab", 
                       background="#f0d0d0",
                       foreground="#440000",
@@ -143,7 +142,7 @@ class FixClientSimulator(tk.Frame):
         ]
 
         entries = {}
-        for i, (label, field_type) in enumerate(fields):
+        for label, field_type in fields:
             tk.Label(dialog, text=label).pack(pady=2)
             if field_type == "entry":
                 entry = ttk.Entry(dialog)
@@ -176,6 +175,7 @@ class FixClientSimulator(tk.Frame):
                 self.sessions[name] = session
 
                 frame, log_widget = self.create_session_tab(name)
+                self.tab_frames[name] = frame  # Store the frame reference
                 self.notebook.add(frame, text=name)
                 self.session_logs[name] = log_widget
                 self.update_tab_style(name, session.connected)
@@ -190,7 +190,6 @@ class FixClientSimulator(tk.Frame):
     def create_session_tab(self, session_name):
         frame = ttk.Frame(self.notebook)
         
-        # Message log with scrollbar
         log_frame = ttk.Frame(frame)
         log_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
@@ -201,7 +200,6 @@ class FixClientSimulator(tk.Frame):
         log_text.pack(side="left", fill="both", expand=True)
         scrollbar.config(command=log_text.yview)
 
-        # Message entry area
         input_frame = ttk.Frame(frame)
         input_frame.pack(fill="x", padx=5, pady=5)
 
@@ -215,9 +213,10 @@ class FixClientSimulator(tk.Frame):
         return frame, log_text
 
     def update_tab_style(self, session_name, connected):
-        if session_name in self.sessions:
+        if session_name in self.tab_frames:
+            tab_id = self.tab_frames[session_name]
             style = "Connected.TNotebook.Tab" if connected else "Disconnected.TNotebook.Tab"
-            self.notebook.tab(session_name, style=style)
+            self.notebook.tab(tab_id, style=style)
 
     def log_message(self, session_name, message):
         if session_name in self.session_logs:
