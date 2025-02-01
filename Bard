@@ -1,9 +1,10 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
+from tkinter import simpledialog, messagebox
 import socket
 import threading
 import queue
-import re
+import uuid
 
 class FixClientSimulator(tk.Frame):
     def __init__(self, master=None):
@@ -11,12 +12,8 @@ class FixClientSimulator(tk.Frame):
         self.master = master
         master.title("FIX Client Simulator")
 
-        self.host = 'localhost'
-        self.port = 5000
-        self.client_socket = None
-        self.message_queue = queue.Queue()
-        self.orders = {}  # Store orders by ClOrdID
-        self.next_clordid = 1
+        self.sessions = {}  # Dictionary to store sessions
+        self.current_session = None  # Currently active session
 
         self.setup_menu()
         self.setup_ui()
@@ -25,121 +22,72 @@ class FixClientSimulator(tk.Frame):
     def setup_menu(self):
         menubar = tk.Menu(self.master)
         self.master.config(menu=menubar)
+
         connection_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Connection", menu=connection_menu)
-        connection_menu.add_command(label="Connect", command=self.show_connection_dialog)
-        connection_menu.add_command(label="Disconnect", command=self.disconnect_from_server, state=tk.DISABLED)  # Disable initially
-        self.disconnect_menu_item = connection_menu.index("Disconnect") #Store index for easy access
+        connection_menu.add_command(label="Add Session", command=self.add_session)
+        connection_menu.add_command(label="Connect", command=self.connect_to_server)
 
     def setup_ui(self):
-        # ... (Existing UI setup code)
+        self.grid(row=0, column=0, sticky="nsew")
+        self.master.rowconfigure(0, weight=1)
+        self.master.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
 
-    def show_connection_dialog(self):
-        # ... (Existing connection dialog code)
-        def connect():
-            # ... (Existing connect logic)
-            if ip and port.isdigit():
-                self.master.config(cursor="wait") #Set cursor to wait while connecting
-                self.master.after(100, self.connect_to_server) #Connect after 100ms to allow cursor change
-                dialog.destroy()
-            # ...
+        self.notebook = ttk.Notebook(self)
+        self.notebook.grid(row=0, column=0, sticky="nsew")
 
-    def connect_to_server(self):
-        try:
-            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.client_socket.connect((self.host, self.port))
-            print("Connected to server")
-            self.receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
-            self.receive_thread.start()
-            self.master.config(cursor="") #Reset cursor
-            self.master.config(menu=self.master.menu)
-            self.master.menu.entryconfig(self.disconnect_menu_item, state=tk.NORMAL)
-        except Exception as e:
-            self.master.config(cursor="") #Reset cursor even on error
-            print(f"Error connecting to server: {e}")
-            messagebox.showerror("Connection Error", f"Could not connect to server: {e}")
+        self.add_session()  # Add initial session
 
-    def disconnect_from_server(self):
-        try:
-            if self.client_socket:
-                self.client_socket.close()
-                self.client_socket = None
-                self.master.menu.entryconfig(self.disconnect_menu_item, state=tk.DISABLED)
-                print("Disconnected from server")
-        except Exception as e:
-            print(f"Error disconnecting: {e}")
+    def add_session(self):
+        session_id = str(uuid.uuid4())
+        self.sessions[session_id] = {
+            "host": 'localhost',
+            "port": 5000,
+            "socket": None,
+            "message_queue": queue.Queue(),
+            "frame": None,
+            "order_tree": None,
+            "order_transactions_list": None,
+            "message_info_text": None,
+            "symbol_entry": None,
+            "price_entry": None,
+            "qty_entry": None,
+            "ordertype_entry": None,
+            "receive_thread": None,
+            "tab_color": self.get_next_color()  # Assign a color to the session
+        }
+        self.create_session_tab(session_id)
+        self.switch_to_session(session_id)
 
-    def send_message(self):
-        # ... (Existing send message logic)
-        clordid = self.next_clordid
-        self.next_clordid += 1
-        message = f"ClOrdID={clordid};Symbol={symbol};Price={price};Qty={qty};OrderType={ordertype}"
-        try:
-            self.client_socket.sendall(message.encode())
-            self.orders[clordid] = {"Symbol": symbol, "Price": price, "Qty": qty, "OrderType": ordertype, "Transactions": []}
-            self.update_order_tree()
-        except Exception as e:
-            messagebox.showerror("Send Error", f"Error sending message: {e}")
+    def get_next_color(self):
+        # Cycle through a list of colors
+        colors = ["lightblue", "lightgreen", "lightyellow", "lightcoral", "lavender"]
+        if not hasattr(self, "color_index"):
+            self.color_index = 0
+        color = colors[self.color_index]
+        self.color_index = (self.color_index + 1) % len(colors)
+        return color
 
-    def receive_messages(self):
-        while self.client_socket: #Check if socket is still open
-            try:
-                data = self.client_socket.recv(1024).decode()
-                if data:
-                    self.message_queue.put(data)
-                else:
-                    break #Connection closed
-            except OSError as e: #Handle socket errors
-                if e.errno == 10054: #Connection reset by peer
-                    print("Server disconnected")
-                    self.disconnect_from_server()
-                    break
-                else:
-                    print(f"Error receiving message: {e}")
-                    break
-            except Exception as e:
-                print(f"Error receiving message: {e}")
-                break
+    def create_session_tab(self, session_id):
+        session_data = self.sessions[session_id]
+        frame = ttk.Frame(self.notebook)
+        session_data["frame"] = frame
+        self.notebook.add(frame, text=f"Session {len(self.sessions)}")
 
-    def process_queue(self):
-        while not self.message_queue.empty():
-            data = self.message_queue.get()
-            self.message_info_text.insert(tk.END, data + "\n")
-            self.message_info_text.see(tk.END)
-            self.process_incoming_message(data) #Process message
+        # Apply color to the tab
+        style = ttk.Style()
+        style.configure(f"TNotebook.Tab.{session_id}", background=session_data["tab_color"]) 
+        style.map(f"TNotebook.Tab.{session_id}", background=[("selected", "white")])  # Highlight selected tab
 
-        self.master.after(100, self.process_queue)
+        self.create_session_content(session_id)
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
 
-    def process_incoming_message(self, message):
-      match = re.match(r"ClOrdID=(\d+);ExecType=([^;]+);(.*)", message)
-      if match:
-          clordid = int(match.group(1))
-          exec_type = match.group(2)
-          details = match.group(3)
+    def create_session_content(self, session_id):
+        # ... (Rest of the code remains the same)
 
-          if clordid in self.orders:
-              self.orders[clordid]["Transactions"].append(f"ExecType={exec_type};{details}")
-              self.update_order_transactions(clordid)
-
-    def update_order_tree(self):
-        self.order_tree.delete(*self.order_tree.get_children())
-        for clordid, order in self.orders.items():
-            self.order_tree.insert("", tk.END, values=(clordid, order["Price"], order["Qty"], order["OrderType"]))
-
-    def update_order_transactions(self, clordid):
-        self.order_transactions_list.delete(0, tk.END)
-        if clordid in self.orders:
-            for transaction in self.orders[clordid]["Transactions"]:
-                self.order_transactions_list.insert(tk.END, transaction)
-
-    def on_order_tree_select(self, event):
-        selected = self.order_tree.selection()
-        if selected:
-            item = selected[0]
-            clordid = self.order_tree.item(item, "values")[0]
-            self.update_order_transactions(int(clordid))
-
-    # ... (rest of the code)
+    # ... (Rest of the code remains the same)
 
 if __name__ == "__main__":
     root = tk.Tk()
