@@ -1,61 +1,50 @@
 import tkinter as tk
-from tkinter import simpledialog
+from tkinter import ttk
 
-class InputDialog(tk.Toplevel):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.result = None  # Store the user input
-        
-        self.title("Enter Details")
-        self.geometry("300x200")
-        
-        # Protocol
-        tk.Label(self, text="Protocol:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        self.protocol_entry = tk.Entry(self)
-        self.protocol_entry.grid(row=0, column=1, padx=10, pady=5)
 
-        # Tab Name
-        tk.Label(self, text="Tab Name:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.tabname_entry = tk.Entry(self)
-        self.tabname_entry.grid(row=1, column=1, padx=10, pady=5)
+class ProtocolSessionDialog(tk.Toplevel):
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.title("Protocol and Session Name")
+        self.geometry("300x150")
 
-        # Log Filename
-        tk.Label(self, text="Log Filename:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.logfile_entry = tk.Entry(self)
-        self.logfile_entry.grid(row=2, column=1, padx=10, pady=5)
+        # Protocol dropdown (Combobox)
+        self.protocol_label = ttk.Label(self, text="Protocol:")
+        self.protocol_label.grid(row=0, column=0, padx=5, pady=5, sticky="e")
+
+        self.protocol_var = tk.StringVar()
+        self.protocol_combobox = ttk.Combobox(self, textvariable=self.protocol_var, values=["FIX", "HTTP", "TCP"], state="readonly")
+        self.protocol_combobox.grid(row=0, column=1, padx=5, pady=5)
+
+        # Session name entry
+        self.session_label = ttk.Label(self, text="Session Name:")
+        self.session_label.grid(row=1, column=0, padx=5, pady=5, sticky="e")
+
+        self.session_entry = ttk.Entry(self)
+        self.session_entry.grid(row=1, column=1, padx=5, pady=5)
 
         # Buttons
-        self.submit_button = tk.Button(self, text="OK", command=self.on_submit)
-        self.submit_button.grid(row=3, column=0, columnspan=2, pady=10)
-        
-        self.protocol("WM_DELETE_WINDOW", self.on_cancel)  # Handle window close
+        self.ok_button = ttk.Button(self, text="OK", command=self.on_ok)
+        self.ok_button.grid(row=2, column=0, columnspan=2, pady=10)
 
-        self.transient(parent)  # Keep dialog on top
-        self.grab_set()  # Make it modal
-        parent.wait_window(self)  # Pause execution until dialog closes
+        self.cancel_button = ttk.Button(self, text="Cancel", command=self.on_cancel)
+        self.cancel_button.grid(row=3, column=0, columnspan=2, pady=5)
 
-    def on_submit(self):
-        self.result = (
-            self.protocol_entry.get(),
-            self.tabname_entry.get(),
-            self.logfile_entry.get()
-        )
+    def on_ok(self):
+        protocol = self.protocol_var.get()
+        session_name = self.session_entry.get()
+        print(f"Protocol: {protocol}, Session Name: {session_name}")
         self.destroy()
 
     def on_cancel(self):
-        self.result = None
         self.destroy()
 
-# Example usage
-def get_inputs():
-    root = tk.Tk()
-    root.withdraw()  # Hide main window
-    dialog = InputDialog(root)
-    if dialog.result:
-        print("Protocol:", dialog.result[0])
-        print("Tab Name:", dialog.result[1])
-        print("Log Filename:", dialog.result[2])
-    else:
-        print("User canceled input")
 
-get_inputs()
+# Sample usage
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.withdraw()  # Hide the root window
+
+    # Create and show the dialog
+    dialog = ProtocolSessionDialog(root)
+    root.wait_window(dialog)  # Wait until the dialog is closed
