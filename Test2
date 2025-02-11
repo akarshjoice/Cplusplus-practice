@@ -5,30 +5,35 @@ class StatusBar(tk.Frame):
     def __init__(self, master):
         super().__init__(master, relief=tk.SUNKEN, borderwidth=1)
         self.grid(sticky="ew")
+        
+        # Define status variables
+        self.protocol_var = tk.StringVar(value="FIX")
+        self.ip_var = tk.StringVar(value="127.0.0.1")
+        self.port_var = tk.StringVar(value="5000")
+        self.status_var = tk.StringVar(value="Disconnected")
 
-        # Create Treeview
-        self.tree = ttk.Treeview(self, columns=("Protocol", "IP", "Port", "Status"), show="headings", height=1)
-        self.tree.heading("Protocol", text="Protocol")
-        self.tree.heading("IP", text="IP")
-        self.tree.heading("Port", text="Port")
-        self.tree.heading("Status", text="Status")
+        # Create labels for each column
+        labels = [("Protocol:", self.protocol_var), 
+                  ("IP:", self.ip_var), 
+                  ("Port:", self.port_var), 
+                  ("Status:", self.status_var)]
 
-        self.tree.column("Protocol", width=100)
-        self.tree.column("IP", width=120)
-        self.tree.column("Port", width=60)
-        self.tree.column("Status", width=100)
+        for col, (text, var) in enumerate(labels):
+            ttk.Label(self, text=text, font=("Arial", 10, "bold")).grid(row=0, column=col*2, padx=(10, 2), pady=2, sticky="w")
+            ttk.Label(self, textvariable=var, font=("Arial", 10)).grid(row=0, column=col*2 + 1, padx=(2, 10), pady=2, sticky="w")
 
-        self.tree.pack(fill="x")
+        # Expand last column to fill space
+        self.columnconfigure(len(labels) * 2 - 1, weight=1)
 
     def update_status(self, protocol, ip, port, status):
-        self.tree.delete(*self.tree.get_children())  # Clear previous entries
-        self.tree.insert("", "end", values=(protocol, ip, port, status), tags=(status,))
-        self.tree.tag_configure("Connected", foreground="green")
-        self.tree.tag_configure("Disconnected", foreground="red")
+        self.protocol_var.set(protocol)
+        self.ip_var.set(ip)
+        self.port_var.set(port)
+        self.status_var.set(status)
 
 # Example usage
 root = tk.Tk()
-root.geometry("500x50")
+root.geometry("500x30")
 
 status_bar = StatusBar(root)
 status_bar.pack(fill="x")
