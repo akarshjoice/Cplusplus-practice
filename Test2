@@ -1,49 +1,64 @@
-#include <iostream>
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <linux/vfio.h>
-#include <sys/mman.h>
-#include <unistd.h>
+import tkinter as tk
+from tkinter import ttk
 
-int main() {
-    // Open VFIO device
-    int vfio_fd = open("/dev/vfio/vfio", O_RDWR);
-    if (vfio_fd < 0) {
-        std::cerr << "Failed to open VFIO device" << std::endl;
-        return -1;
-    }
 
-    // Open specific PCI device through VFIO
-    int pci_fd = open("/dev/vfio/0000:XX:XX.X", O_RDWR);  // Replace with your PCI device ID
-    if (pci_fd < 0) {
-        std::cerr << "Failed to open PCI device" << std::endl;
-        close(vfio_fd);
-        return -1;
-    }
+class FixClientSimulator(tk.Frame):
+    def __init__(self, master=None):
+        super().__init__(master)
+        self.master = master
+        master.title("FIX Client Simulator")
 
-    // Set VFIO to use the specific PCI device
-    vfio_info_cap vfiocap;
-    vfiocap.argsz = sizeof(vfio_info_cap);
-    vfiocap.flags = VFIO_DEVICE_GET_INFO;
-    ioctl(vfio_fd, VFIO_GET_API_VERSION, &vfiocap);
+        # Default values for connection details
+        self.protocol = "FIX"
+        self.host = "localhost"
+        self.port = 5000
+        self.connection_status = "Disconnected"
 
-    // Map FPGA memory
-    void* fpga_base_addr = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, pci_fd, 0);
-    if (fpga_base_addr == MAP_FAILED) {
-        std::cerr << "Memory mapping failed." << std::endl;
-        close(pci_fd);
-        close(vfio_fd);
-        return -1;
-    }
+        # GUI setup
+        self.setup_ui()
 
-    // Example read
-    uint32_t data = *(volatile uint32_t*)(fpga_base_addr);
-    std::cout << "Read Data: " << data << std::endl;
+    def setup_ui(self):
+        # Main content frame
+        self.main_frame = tk.Frame(self)
+        self.main_frame.pack(fill="both", expand=True)
 
-    // Cleanup
-    munmap(fpga_base_addr, 4096);
-    close(pci_fd);
-    close(vfio_fd);
+        # Status bar at the bottom
+        self.status_bar = tk.Frame(self.master, relief=tk.SUNKEN, borderwidth=1)
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
-    return 0;
-}
+        # Labels for each column
+        self.protocol_label = ttk.Label(self.status_bar, text=f"Protocol: {self.protocol}", anchor="w")
+        self.host_label = ttk.Label(self.status_bar, text=f"Host: {self.host}", anchor="w")
+        self.port_label = ttk.Label(self.status_bar, text=f"Port: {self.port}", anchor="w")
+        self.status_label = ttk.Label(self.status_bar, text=f"Status: {self.connection_status}", anchor="w")
+
+        # Grid layout
+        self.status_bar.columnconfigure((0, 1, 2, 3), weight=1)  # Distribute space equally
+        self.protocol_label.grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        self.host_label.grid(row=0, column=1, padx=10, pady=5, sticky="w")
+        self.port_label.grid(row=0, column=2, padx=10, pady=5, sticky="w")
+        self.status_label.grid(row=0, column=3, padx=10, pady=5, sticky="w")
+
+        # Button to simulate connection toggle
+        self.toggle_button = ttk.Button(self.master, text="Toggle Connection", command=self.toggle_connection)
+        self.toggle_button.pack(pady=10)
+
+    def update_status(self):
+        """Update the status labels dynamically."""
+        self.protocol_label.config(text=f"Protocol: {self.protocol}")
+        self.host_label.config(text=f"Host: {self.host}")
+        self.port_label.config(text=f"Port: {self.port}")
+        self.status_label.config(text=f"Status: {self.connection_status}")
+
+    def toggle_connection(self):
+        """Simulates toggling the connection status."""
+        self.connection_status = "Connected" if self.connection_status == "Disconnected" else "Disconnected"
+        self.update_status()
+
+
+# Run the application
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = FixClientSimulator(master=root)
+    app.pack(fill="both", expand=True)
+    root.mainloop()
