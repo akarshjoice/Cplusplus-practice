@@ -1,0 +1,104 @@
+from collections import defaultdict, deque
+from typing import Dict, List, Tuple
+
+class OrderBook:
+    def __init__(self):
+        self.orders: Dict[str, Dict] = {}
+
+    def _parse_fix_message(self, fix_msg: str) -> Dict[str, str]:
+        """Parses a FIX message into a dictionary."""
+        return dict(item.split('=') for item in fix_msg.split('|') if '=' in item)
+
+    def _update_order(self, clorid: str, event_type: str, data: Dict[str, str]) -> None:
+        """Updates order state and appends the event to the history."""
+        if clorid not in self.orders:
+            self.orders[clorid] = {'state': {}, 'history': deque()}
+
+        self.orders[clorid]['state'].update(data)
+        self.orders[clorid]['history'].append((event_type, data))
+
+    def add_order(self, fix_msg: str) -> None:
+        """Adds a new order to the order book."""
+        order = self._parse_fix_message(fix_msg)
+        clorid = order.get('11')
+
+        if not clorid:
+            print("Invalid order: Missing ClOrdID")
+            return
+
+        order['remaining_qty'] = int(order.get('38', 0))
+        order['status'] = 'New'
+
+        self._update_order(clorid, "Order Sent", order)
+        print(f"Added Order {clorid}: {order}")
+
+    def process_execution_report(self, fix_msg: str) -> None:
+        """Updates order status based on execution report."""
+        report = self._parse_fix_message(fix_msg)
+        clorid = report.get('11')
+        filled_qty = int(report.get('14', 0))
+
+        if clorid not in self.orders:
+            print(f"Unknown execution report received for {clorid}")
+            return
+
+        order = self.orders[clorid]['state']
+        order['remaining_qty'] = max(0, int(order.get('38', 0)) - filled_qty)
+        order['status'] = 'Partially Filled' if order['remaining_qty'] > 0 else 'Filled'
+
+        self._update_order(clorid, "Execution Received", report)
+        print(f"Updated Order {clorid}: Remaining {order['remaining_qty']}")
+
+    def replace_order(self, fix_msg: str) -> None:
+        """Handles order replace requests."""
+        replace = self._parse_fix_message(fix_msg)
+        old_clorid = replace.get('41')
+        new_clorid = replace.get('11')
+
+        if old_clorid not in self.orders:
+            print(f"Replace request failed: Original order {old_clorid} not found")
+            return
+
+        new_order = self.orders[old_clorid]['state'].copy()
+        new_order.update(replace)
+        new_order['status'] = 'Replaced'
+
+        self.orders[new_clorid] = {'state': new_order, 'history': self.orders[old_clorid]['history']}
+        self._update_order(new_clorid, "Order Replaced", {'from': old_clorid, **new_order})
+
+        del self.orders[old_clorid]
+        print(f"Order {old_clorid} replaced with {new_clorid}")
+
+    def reject_order(self, fix_msg: str) -> None:
+        """Handles order rejections."""
+        reject = self._parse_fix_message(fix_msg)
+        clorid = reject.get('11')
+        reason = reject.get('58', 'Unknown reason')
+
+        if clorid not in self.orders:
+            print(f"Reject received for unknown order {clorid}")
+            return
+
+        self._update_order(clorid, "Order Rejected", {'status': 'Rejected', 'reject_reason': reason})
+        print(f"Order {clorid} rejected: {reason}")
+
+    def cancel_order(self, clorid: str) -> None:
+        """Cancels an order if possible."""
+        if clorid not in self.orders or self.orders[clorid]['state']['status'] in ['Rejected', 'Filled']:
+            print(f"Cannot cancel order {clorid}")
+            return
+
+        self._update_order(clorid, "Order Canceled", {'remaining_qty': 0, 'status': 'Canceled'})
+        print(f"Order {clorid} canceled.")
+
+    def get_order_status(self, clorid: str) -> str:
+        """Returns the latest status of an order."""
+        return self.orders.get(clorid, {}).get('state', {}).get('status', 'Unknown')
+
+    def get_order_history(self, clorid: str) -> List[Tuple[str, Dict[str, str]]]:
+        """Returns the send-receive sequence for a specific ClOrdID."""
+        return list(self.orders.get(clorid, {}).get('history', []))
+
+    def get_all_orders(self) -> Dict[str, Dict]:
+        """Returns all orders with their states and histories."""
+        return {clorid: {'state': order['state'], 'history': list(order['history'])} for clorid, order in self.orders.items()}
