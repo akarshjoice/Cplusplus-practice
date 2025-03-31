@@ -1,0 +1,413 @@
+import tkinter as tk
+from tkinter import ttk
+from tkinter import messagebox, Toplevel
+import socket
+import threading
+import queue
+import time
+import sys
+
+class RegressionManager:
+    def __init__(self, client_socket=None, regression_queue=None, status_callback=None, lock=None):
+        self.client_socket = client_socket
+        self.regression_queue = regression_queue or queue.Queue()
+        self.status_callback = status_callback
+        self.lock = lock or threading.Lock()
+        self.is_running = False
+        
+        self.test_cases = [
+            {"name": "Market Order", "symbol": "AAPL", "price": "150", "qty": "100", "ordertype": "1", "expected": "Order Accepted"},
+            {"name": "Limit Order", "symbol": "GOOG", "price": "2000", "qty": "50", "ordertype": "2", "expected": "Order Accepted"},
+            {"name": "Invalid Price", "symbol": "MSFT", "price": "-10", "qty": "100", "ordertype": "1", "expected": "Order Rejected"},
+        ]
+        self.results = {"total": 0, "pass": 0, "fail": 0, "running": False}
+
+    def update_status(self, test_name, status, details=""):
+        with self.lock:
+            if self.status_callback:
+                self.status_callback(test_name, status, details, self.results)
+            else:
+                summary = f"Total: {self.results['total']}, Pass: {self.results['pass']}, Fail: {self.results['fail']}"
+                print(f"{test_name}: {status} - {details} | {summary}")
+
+    def run_regression(self, selected_tests=None):
+        with self.lock:
+            if self.is_running:
+                self.update_status("", "Error", "Regression already running")
+                return False
+            self.is_running = True
+            self.results = {"total": 0, "pass": 0, "fail": 0, "running": True}
+
+        if not self.client_socket:
+            self.update_status("", "Error", "Not connected to server")
+            with self.lock:
+                self.is_running = False
+            return False
+
+        selected_tests = selected_tests or [test["name"] for test in self.test_cases]
+        total_tests = len(selected_tests)
+        self.update_status("", "Running", f"Starting regression tests ({total_tests} tests selected)")
+        
+        for test in [t for t in self.test_cases if t["name"] in selected_tests]:
+            self.update_status(test["name"], "Running", "")
+            message = f"Symbol={test['symbol']};Price={test['price']};Qty={test['qty']};OrderType={test['ordertype']}"
+            try:
+                with self.lock:
+                    self.client_socket.sendall(message.encode())
+                time.sleep(1)
+                response = self.regression_queue.get(timeout=2)
+                with self.lock:
+                    self.results["total"] += 1
+                    if test["expected"] in response:
+                        self.results["pass"] += 1
+                        self.update_status(test["name"], "Pass", response)
+                    else:
+                        self.results["fail"] += 1
+                        self.update_status(test["name"], "Fail", f"Expected {test['expected']}, got {response}")
+            except Exception as e:
+                with self.lock:
+                    self.results["total"] += 1
+                    self.results["fail"] += 1
+                self.update_status(test["name"], "Fail", f"Error: {str(e)}")
+        
+        with self.lock:
+            self.is_running = False
+            self.results["running"] = False
+        self.update_status("", "Complete", f"Regression completed")
+        return self.results["fail"] == 0
+
+    def is_regression_running(self):
+        with self.lock:
+            return self.is_running
+
+class RegressionRunnerCLI:
+    def __init__(self, host='localhost', port=5000, test_cases=None):
+        self.host = host
+        self.port = port
+        self.test_cases = test_cases
+        self.client_socket = None
+        self.regression_queue = queue.Queue()
+        self.regression_manager = RegressionManager(self.client_socket, self.regression_queue)
+
+    def connect(self):
+        try:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((self.host, self.port))
+            self.regression_manager.client_socket = self.client_socket
+            print("Connected to server")
+            return True
+        except Exception as e:
+            print(f"Error connecting to server: {e}")
+            return False
+
+    def receive_messages(self):
+        while True:
+            try:
+                data = self.client_socket.recv(1024).decode()
+                if data:
+                    self.regression_queue.put(data)
+                else:
+                    break
+            except Exception as e:
+                print(f"Error receiving message: {e}")
+                break
+
+    def run(self):
+        if not self.connect():
+            return False
+
+        receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
+        receive_thread.start()
+
+        success = self.regression_manager.run_regression(self.test_cases)
+        self.client_socket.close()
+        return success
+
+class FixClientSimulator(tk.Frame):
+    def __init__(self, master=None):
+        super().__init__(master)
+        self.master = master
+        master.title("FIX Client Simulator")
+
+        self.host = 'localhost'
+        self.port = 5000
+        self.client_socket = None
+        self.general_queue = queue.Queue()  # For manual orders and general messages
+        self.regression_queue = queue.Queue()  # For regression responses
+        self.lock = threading.Lock()
+        self.regression_manager = RegressionManager(
+            self.client_socket, 
+            self.regression_queue, 
+            self.update_regression_status,
+            self.lock
+        )
+
+        self.setup_menu()
+        self.setup_ui()
+        self.process_queue()
+
+    def setup_menu(self):
+        menubar = tk.Menu(self.master)
+        self.master.config(menu=menubar)
+
+        connection_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Connection", menu=connection_menu)
+        connection_menu.add_command(label="Connect", command=self.show_connection_dialog)
+
+        test_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Tests", menu=test_menu)
+        test_menu.add_command(label="Run Regression", command=self.show_regression_dialog)
+        # Future options can be added here
+        # test_menu.add_command(label="Run Stress Test", command=self.show_stress_test_dialog)
+        # test_menu.add_command(label="Run Performance Test", command=self.show_performance_test_dialog)
+
+    def setup_ui(self):
+        self.grid(row=0, column=0, sticky="nsew")
+        self.master.rowconfigure(0, weight=1)
+        self.master.columnconfigure(0, weight=1)
+
+        # Notebook for tabs
+        self.notebook = ttk.Notebook(self)
+        self.notebook.grid(row=0, column=0, sticky="nsew")
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+
+        # Tab 1: Order Entry
+        self.order_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.order_tab, text="Order Entry")
+        
+        self.order_tree_frame = ttk.Labelframe(self.order_tab, text="Order Details")
+        self.order_tree_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.order_tree = ttk.Treeview(self.order_tree_frame, columns=("clordid", "price", "quantity", "messagetype"), show="headings")
+        self.order_tree.heading("clordid", text="ClOrdID")
+        self.order_tree.heading("price", text="Price")
+        self.order_tree.heading("quantity", text="Quantity")
+        self.order_tree.heading("messagetype", text="MessageType")
+        self.order_tree.pack(fill="both", expand=True)
+
+        self.order_transactions_frame = ttk.Labelframe(self.order_tab, text="Order Transactions")
+        self.order_transactions_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.order_transactions_list = tk.Listbox(self.order_transactions_frame)
+        self.order_transactions_list.pack(fill="both", expand=True)
+
+        self.fix_fields_frame = ttk.Labelframe(self.order_tab, text="FIX Fields")
+        self.fix_fields_frame.pack(fill="x", padx=5, pady=5)
+        self.symbol_label = ttk.Label(self.fix_fields_frame, text="Symbol:")
+        self.symbol_label.grid(row=0, column=0, padx=5, pady=5)
+        self.symbol_entry = ttk.Entry(self.fix_fields_frame)
+        self.symbol_entry.grid(row=0, column=1, padx=5, pady=5)
+        self.price_label = ttk.Label(self.fix_fields_frame, text="Price:")
+        self.price_label.grid(row=1, column=0, padx=5, pady=5)
+        self.price_entry = ttk.Entry(self.fix_fields_frame)
+        self.price_entry.grid(row=1, column=1, padx=5, pady=5)
+        self.qty_label = ttk.Label(self.fix_fields_frame, text="Qty:")
+        self.qty_label.grid(row=2, column=0, padx=5, pady=5)
+        self.qty_entry = ttk.Entry(self.fix_fields_frame)
+        self.qty_entry.grid(row=2, column=1, padx=5, pady=5)
+        self.ordertype_label = ttk.Label(self.fix_fields_frame, text="OrderType:")
+        self.ordertype_label.grid(row=3, column=0, padx=5, pady=5)
+        self.ordertype_entry = ttk.Entry(self.fix_fields_frame)
+        self.ordertype_entry.grid(row=3, column=1, padx=5, pady=5)
+        self.send_button = ttk.Button(self.fix_fields_frame, text="Send", command=self.send_message)
+        self.send_button.grid(row=4, columnspan=2, pady=10)
+
+        # Tab 2: Messages
+        self.message_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.message_tab, text="Messages")
+        
+        self.message_info_frame = ttk.Labelframe(self.message_tab, text="Message Info")
+        self.message_info_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.message_info_text = tk.Text(self.message_info_frame, height=10, wrap="word")
+        self.message_info_text.pack(fill="both", expand=True)
+
+        # Tab 3: Regression
+        self.regression_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.regression_tab, text="Regression")
+        
+        self.regression_control_frame = ttk.Frame(self.regression_tab)
+        self.regression_control_frame.pack(fill="x", padx=5, pady=5)
+        self.run_regression_button = ttk.Button(self.regression_control_frame, 
+                                              text="Run Regression", 
+                                              command=self.show_regression_dialog)
+        self.run_regression_button.pack(side="left", padx=5)
+
+        self.regression_summary_frame = ttk.Frame(self.regression_tab)
+        self.regression_summary_frame.pack(fill="x", padx=5, pady=2)
+        self.total_label = ttk.Label(self.regression_summary_frame, text="Total: 0")
+        self.total_label.pack(side="left", padx=5)
+        self.pass_label = ttk.Label(self.regression_summary_frame, text="Pass: 0")
+        self.pass_label.pack(side="left", padx=5)
+        self.fail_label = ttk.Label(self.regression_summary_frame, text="Fail: 0")
+        self.fail_label.pack(side="left", padx=5)
+
+        self.progress = ttk.Progressbar(self.regression_tab, length=200, mode='determinate')
+        self.progress.pack(fill="x", padx=5, pady=5)
+        
+        self.status_tree = ttk.Treeview(self.regression_tab, 
+                                      columns=("Test", "Status", "Details"), 
+                                      show="headings")
+        self.status_tree.heading("Test", text="Test Case")
+        self.status_tree.heading("Status", text="Status")
+        self.status_tree.heading("Details", text="Details")
+        self.status_tree.column("Test", width=100)
+        self.status_tree.column("Status", width=60)
+        self.status_tree.column("Details", width=300)
+        self.status_tree.pack(fill="both", expand=True)
+        
+        self.status_tree.tag_configure("Running", background="yellow")
+        self.status_tree.tag_configure("Pass", background="lightgreen")
+        self.status_tree.tag_configure("Fail", background="salmon")
+        self.status_tree.tag_configure("Complete", background="lightgray")
+
+        # Bind events
+        self.order_tree.bind("<ButtonRelease-1>", self.on_order_tree_select)
+        self.order_transactions_list.bind("<ButtonRelease-1>", self.on_transaction_select)
+
+    def update_regression_status(self, test_name, status, details, results):
+        self.total_label.config(text=f"Total: {results['total']}")
+        self.pass_label.config(text=f"Pass: {results['pass']}")
+        self.fail_label.config(text=f"Fail: {results['fail']}")
+
+        total_tests = len(self.regression_manager.test_cases)
+        if total_tests > 0:
+            self.progress['value'] = (results['total'] / total_tests) * 100
+
+        if test_name:
+            for item in self.status_tree.get_children():
+                if self.status_tree.item(item, "values")[0] == test_name:
+                    self.status_tree.item(item, values=(test_name, status, details), tags=(status,))
+                    return
+            self.status_tree.insert("", "end", values=(test_name, status, details), tags=(status,))
+        else:
+            self.status_tree.insert("", "end", values=("", status, details), tags=(status,))
+
+        # Log to Messages tab for visibility
+        self.message_info_text.insert(tk.END, f"Regression - {test_name}: {status} - {details}\n")
+        self.message_info_text.see(tk.END)
+
+    def show_regression_dialog(self):
+        if not self.client_socket:
+            messagebox.showerror("Error", "Please connect to server first")
+            return
+
+        if self.regression_manager.is_regression_running():
+            messagebox.showwarning("Warning", "Regression is already running")
+            return
+
+        dialog = Toplevel(self)
+        dialog.title("Run Regression Tests")
+        dialog.geometry("400x300")
+
+        tk.Label(dialog, text="Select Test Cases:").pack(pady=5)
+        
+        test_listbox = tk.Listbox(dialog, selectmode="multiple")
+        for test in self.regression_manager.test_cases:
+            test_listbox.insert(tk.END, test["name"])
+        test_listbox.pack(pady=5, fill="both", expand=True)
+
+        def run_tests():
+            selected_indices = test_listbox.curselection()
+            selected_tests = [test_listbox.get(i) for i in selected_indices]
+            if selected_tests:
+                self.status_tree.delete(*self.status_tree.get_children())
+                self.progress['value'] = 0
+                self.total_label.config(text="Total: 0")
+                self.pass_label.config(text="Pass: 0")
+                self.fail_label.config(text="Fail: 0")
+                dialog.destroy()
+                threading.Thread(target=self.regression_manager.run_regression, 
+                               args=(selected_tests,), daemon=True).start()
+                self.notebook.select(self.regression_tab)
+            else:
+                messagebox.showwarning("Warning", "Please select at least one test case")
+
+        run_button = ttk.Button(dialog, text="Run", command=run_tests)
+        run_button.pack(pady=10)
+
+    def send_message(self):
+        if self.regression_manager.is_regression_running():
+            messagebox.showwarning("Warning", "Cannot send orders while regression is running")
+            return
+
+        symbol = self.symbol_entry.get()
+        price = self.price_entry.get()
+        qty = self.qty_entry.get()
+        ordertype = self.ordertype_entry.get()
+
+        message = f"Symbol={symbol};Price={price};Qty={qty};OrderType={ordertype}"
+        try:
+            with self.lock:
+                self.client_socket.sendall(message.encode())
+            self.message_info_text.insert(tk.END, f"Sent: {message}\n")
+            self.message_info_text.see(tk.END)
+            self.symbol_entry.delete(0, tk.END)
+            self.price_entry.delete(0, tk.END)
+            self.qty_entry.delete(0, tk.END)
+            self.ordertype_entry.delete(0, tk.END)
+        except Exception as e:
+            print(f"Error sending message: {e}")
+            self.message_info_text.insert(tk.END, f"Error sending message: {e}\n")
+            self.message_info_text.see(tk.END)
+
+    def connect_to_server(self):
+        try:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((self.host, self.port))
+            self.regression_manager.client_socket = self.client_socket
+            print("Connected to server")
+            self.receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
+            self.receive_thread.start()
+            self.message_info_text.insert(tk.END, "Connected to server\n")
+            self.message_info_text.see(tk.END)
+        except Exception as e:
+            print(f"Error connecting to server: {e}")
+            messagebox.showerror("Connection Error", f"Could not connect to server: {e}")
+
+    def receive_messages(self):
+        while True:
+            try:
+                data = self.client_socket.recv(1024).decode()
+                if data:
+                    with self.lock:
+                        if self.regression_manager.is_running:
+                            self.regression_queue.put(data)  # Regression responses
+                        else:
+                            self.general_queue.put(data)  # Manual order responses
+                else:
+                    break
+            except Exception as e:
+                print(f"Error receiving message: {e}")
+                with self.lock:
+                    self.message_info_text.insert(tk.END, f"Error receiving message: {e}\n")
+                    self.message_info_text.see(tk.END)
+                break
+
+    def process_queue(self):
+        try:
+            while True:
+                message = self.general_queue.get_nowait()
+                self.message_info_text.insert(tk.END, f"Received: {message}\n")
+                self.message_info_text.see(tk.END)
+        except queue.Empty:
+            self.master.after(100, self.process_queue)
+
+    def on_order_tree_select(self, event):
+        pass  # Placeholder for order tree selection handling
+
+    def on_transaction_select(self, event):
+        pass  # Placeholder for transaction list selection handling
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--no-gui":
+        host = sys.argv[2] if len(sys.argv) > 2 else 'localhost'
+        port = int(sys.argv[3]) if len(sys.argv) > 3 else 5000
+        test_cases = sys.argv[4:] if len(sys.argv) > 4 else None
+        
+        runner = RegressionRunnerCLI(host, port, test_cases)
+        success = runner.run()
+        sys.exit(0 if success else 1)
+    else:
+        root = tk.Tk()
+        app = FixClientSimulator(master=root)
+        app.pack(fill="both", expand=True)
+        root.mainloop()
