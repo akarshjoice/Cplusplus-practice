@@ -1,0 +1,164 @@
+from __future__ import print_function  # Enables print() function in Python 2
+from scapy.all import *
+import time
+import argparse
+import os
+
+def replay_packets(pcap_file, interface_a, interface_c, 
+                   prod_ip_a, prod_ip_c, prod_ip_fpga_a, prod_ip_fpga_c,
+                   lab_ip_a, lab_ip_c, lab_ip_fpga_a, lab_ip_fpga_c,
+                   lab_mac_a, lab_mac_c, lab_mac_fpga_a, lab_mac_fpga_c):
+    """
+    Replay packets from a production PCAP file in a lab setup with different IPs and MACs.
+
+    Parameters:
+    - pcap_file: Path to the production PCAP file.
+    - interface_a: Lab network interface for A.
+    - interface_c: Lab network interface for C.
+    - prod_ip_a: Production IP of interface A.
+    - prod_ip_c: Production IP of interface C.
+    - prod_ip_fpga_a: Production IP of FPGA for A to FPGA.
+    - prod_ip_fpga_c: Production IP of FPGA for C to FPGA.
+    - lab_ip_a: Lab IP of interface A.
+    - lab_ip_c: Lab IP of interface C.
+    - lab_ip_fpga_a: Lab IP of FPGA for A to FPGA.
+    - lab_ip_fpga_c: Lab IP of FPGA for C to FPGA.
+    - lab_mac_a: Lab MAC of interface A.
+    - lab_mac_c: Lab MAC of interface C.
+    - lab_mac_fpga_a: Lab MAC of FPGA for A to FPGA.
+    - lab_mac_fpga_c: Lab MAC of FPGA for C to FPGA.
+    """
+    # Load packets from the production PCAP file
+    packets = rdpcap(pcap_file)
+
+    # Store packets to replay with their interface and timing info
+    replay_list = []
+
+    # Filter and modify packets based on production source and destination IPs
+    for pkt in packets:
+        if IP in pkt and Ether in pkt:  # Ensure the packet has IP and Ethernet layers
+            # A to FPGA packets in production
+            if pkt[IP].src == prod_ip_a and pkt[IP].dst == prod_ip_fpga_a:
+                pkt[IP].src = lab_ip_a
+                pkt[IP].dst = lab_ip_fpga_a
+                pkt[Ether].src = lab_mac_a
+                pkt[Ether].dst = lab_mac_fpga_a
+                replay_list.append({
+                    'packet': pkt,
+                    'interface': interface_a,
+                    'time': pkt.time,
+                    'direction': 'A(%s) -> FPGA(%s)' % (lab_ip_a, lab_ip_fpga_a)
+                })
+            # C to FPGA packets in production
+            elif pkt[IP].src == prod_ip_c and pkt[IP].dst == prod_ip_fpga_c:
+                pkt[IP].src = lab_ip_c
+                pkt[IP].dst = lab_ip_fpga_c
+                pkt[Ether].src = lab_mac_c
+                pkt[Ether].dst = lab_mac_fpga_c
+                replay_list.append({
+                    'packet': pkt,
+                    'interface': interface_c,
+                    'time': pkt.time,
+                    'direction': 'C(%s) -> FPGA(%s)' % (lab_ip_c, lab_ip_fpga_c)
+                })
+
+    # Sort packets by timestamp to maintain original order
+    replay_list.sort(key=lambda x: x['time'])
+
+    if not replay_list:
+        print("No matching packets found in the capture!")
+        return
+
+    # Get the timestamp of the first packet as reference
+    start_time = replay_list[0]['time']
+    replay_start = time.time()
+
+    print("Starting replay of %d packets..." % len(replay_list))
+
+    # Replay packets with timing
+    for pkt_info in replay_list:
+        # Calculate the delay from the start time
+        relative_time = pkt_info['time'] - start_time
+        elapsed_time = time.time() - replay_start
+
+        # Wait if needed to match original timing
+        if relative_time > elapsed_time:
+            time.sleep(relative_time - elapsed_time)
+
+        # Send the modified packet on the correct interface
+        try:
+            sendp(pkt_info['packet'], iface=pkt_info['interface'], verbose=False)
+            print("Sent packet: %s on %s" % (pkt_info['direction'], pkt_info['interface']))
+        except Exception, e:
+            print("Error sending packet: %s" % str(e))
+
+    print("Packet replay completed!")
+
+def main():
+    # Check if running with root privileges
+    if os.geteuid() != 0:
+        print("This script must be run with root privileges. Please use sudo.")
+        exit(1)
+
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description="Replay packets from production capture in lab setup. Note: Run this script with root privileges (e.g., using sudo).")
+    parser.add_argument("--prod-a", required=True, help="Production IP of interface A")
+    parser.add_argument("--prod-c", required=True, help="Production IP of interface C")
+    parser.add_argument("--prod-fpga-a", required=True, help="Production IP of FPGA for A to FPGA")
+    parser.add_argument("--prod-fpga-c", required=True, help="Production IP of FPGA for C to FPGA")
+    parser.add_argument("--lab-a", required=True, help="Lab IP of interface A")
+    parser.add_argument("--lab-c", required=True, help="Lab IP of interface C")
+    parser.add_argument("--lab-fpga-a", required=True, help="Lab IP of FPGA for A to FPGA")
+    parser.add_argument("--lab-fpga-c", required=True, help="Lab IP of FPGA for C to FPGA")
+    parser.add_argument("--mac-a", required=True, help="Lab MAC of interface A")
+    parser.add_argument("--mac-c", required=True, help="Lab MAC of interface C")
+    parser.add_argument("--mac-fpga-a", required=True, help="Lab MAC of FPGA for A to FPGA")
+    parser.add_argument("--mac-fpga-c", required=True, help="Lab MAC of FPGA for C to FPGA")
+    parser.add_argument("--interface-a", required=True, help="Lab network interface for A")
+    parser.add_argument("--interface-c", required=True, help="Lab network interface for C")
+    parser.add_argument("--pcap", required=True, help="Path to production PCAP file")
+
+    # Parse arguments
+    args = parser.parse_args()
+
+    # Print configuration for verification
+    print("Configuration:")
+    print("PCAP file: %s" % args.pcap)
+    print("Interface A: %s" % args.interface_a)
+    print("Interface C: %s" % args.interface_c)
+    print("Production IPs: A=%s, C=%s, FPGA_A=%s, FPGA_C=%s" % 
+          (args.prod_a, args.prod_c, args.prod_fpga_a, args.prod_fpga_c))
+    print("Lab IPs: A=%s, C=%s, FPGA_A=%s, FPGA_C=%s" % 
+          (args.lab_a, args.lab_c, args.lab_fpga_a, args.lab_fpga_c))
+    print("Lab MACs: A=%s, C=%s, FPGA_A=%s, FPGA_C=%s" % 
+          (args.mac_a, args.mac_c, args.mac_fpga_a, args.mac_fpga_c))
+
+    # Ask for confirmation
+    response = raw_input("Proceed with replay? (y/n): ")
+    if response.lower() != 'y':
+        print("Aborted.")
+        return
+
+    try:
+        replay_packets(
+            args.pcap,
+            args.interface_a,
+            args.interface_c,
+            args.prod_a,
+            args.prod_c,
+            args.prod_fpga_a,
+            args.prod_fpga_c,
+            args.lab_a,
+            args.lab_c,
+            args.lab_fpga_a,
+            args.lab_fpga_c,
+            args.mac_a,
+            args.mac_c,
+            args.mac_fpga_a,
+            args.mac_fpga_c
+        )
+    except Exception, e:
+        print("An error occurred: %s" % str(e))
+
+if __name__ == "__main__":
+    main()
