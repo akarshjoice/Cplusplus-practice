@@ -44,3 +44,32 @@ def show_regression_dialog(self):
         deselect_all_button.grid(row=4, column=1, padx=5, pady=5, sticky="e")
 
         # Run Button
+        def run_tests():
+            username = username_entry.get()
+            logserverip = logserverip_entry.get()
+            selected_indices = test_listbox.curselection()
+            selected_tests = [test_listbox.get(i) for i in selected_indices]
+
+            if not username or not logserverip:
+                messagebox.showwarning("Warning", "Please enter both username and log server IP.")
+                return
+
+            if not selected_tests:
+                messagebox.showwarning("Warning", "Please select at least one test case.")
+                return
+
+            # Log the additional inputs for now (could be used later)
+            self.message_log_callback(f"Starting regression with Username: {username}, Log Server IP: {logserverip}")
+
+            self.status_tree.delete(*self.status_tree.get_children())
+            self.test_logs.clear()  # Clear logs for new run
+            self.progress['value'] = 0
+            self.total_label.config(text="Total: 0")
+            self.pass_label.config(text="Pass: 0")
+            self.fail_label.config(text="Fail: 0")
+            dialog.destroy()
+            threading.Thread(target=self.regression_manager.run_regression, 
+                           args=(selected_tests,), daemon=True).start()
+            self.notebook.select(self)
+
+        ttk.Button(dialog, text="Run", command=run_tests).grid(row=5, column=0, columnspan=2, pady=10)
