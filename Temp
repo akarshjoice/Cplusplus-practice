@@ -1,85 +1,46 @@
-import tkinter as tk
-from tkinter import ttk
-from tkinter import PhotoImage
+def show_regression_dialog(self):
+        if not self.regression_manager.client_socket:
+            messagebox.showerror("Error", "Please connect to server first")
+            return
 
-class FixClientSimulator(tk.Frame):
-    def __init__(self, master=None):
-        super().__init__(master)
-        self.master = master
-        master.title("FIX Client Simulator")
+        if self.regression_manager.is_regression_running():
+            messagebox.showwarning("Warning", "Regression is already running")
+            return
 
-        # Notebook for multiple sessions
-        self.notebook = ttk.Notebook(self.master)
-        self.notebook.pack(fill="both", expand=True)
+        dialog = Toplevel(self)
+        dialog.title("Run Regression Tests")
+        dialog.geometry("400x400")
+        dialog.grid_columnconfigure(1, weight=1)  # Allow entries and listbox to expand horizontally
 
-        # Session tracking
-        self.sessions = {}
+        # Username
+        ttk.Label(dialog, text="Username:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        username_entry = ttk.Entry(dialog)
+        username_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        username_entry.insert(0, "user1")  # Default value for demonstration
 
-        # Load images for tab icons
-        self.connected_icon = PhotoImage(file="connected_icon.png")  # Replace with your image path
-        self.disconnected_icon = PhotoImage(file="disconnected_icon.png")  # Replace with your image path
+        # Log Server IP
+        ttk.Label(dialog, text="Log Server IP:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        logserverip_entry = ttk.Entry(dialog)
+        logserverip_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        logserverip_entry.insert(0, "192.168.1.100")  # Default value for demonstration
 
-        # Menu bar
-        self.setup_menu()
+        # Test Cases Label
+        ttk.Label(dialog, text="Select Test Cases:").grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="w")
 
-    def setup_menu(self):
-        """Creates the menu bar."""
-        menubar = tk.Menu(self.master)
-        self.master.config(menu=menubar)
+        # Test Cases Listbox
+        test_listbox = tk.Listbox(dialog, selectmode="multiple", height=10)
+        for test in self.regression_manager.test_cases:
+            test_listbox.insert(tk.END, test["name"])
+        test_listbox.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky="nsew")
+        dialog.grid_rowconfigure(3, weight=1)  # Allow listbox to expand vertically
 
-        session_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Session", menu=session_menu)
-        session_menu.add_command(label="Add New Session", command=self.add_new_session)
-        session_menu.add_command(label="Disconnect Session", command=self.disconnect_session)
-        session_menu.add_command(label="Reconnect Session", command=self.reconnect_session)
+        # Select All and Deselect All Buttons
+        select_all_button = ttk.Button(dialog, text="Select All", 
+                                     command=lambda: [test_listbox.select_set(0, tk.END)])
+        select_all_button.grid(row=4, column=0, padx=5, pady=5, sticky="w")
 
-    def add_new_session(self):
-        """Opens a dialog to get session name and user info."""
-        session_name = f"Session {len(self.notebook.tabs()) + 1}"  # Auto-generate a name
-        self.create_session_tab(session_name)
+        deselect_all_button = ttk.Button(dialog, text="Deselect All", 
+                                       command=lambda: [test_listbox.selection_clear(0, tk.END)])
+        deselect_all_button.grid(row=4, column=1, padx=5, pady=5, sticky="e")
 
-    def create_session_tab(self, session_name):
-        """Creates a new tab with session tracking."""
-        session_frame = ttk.Frame(self.notebook)
-        tab_id = self.notebook.index("end")
-        self.notebook.add(session_frame, text="", image=self.connected_icon)  # Default image (connected)
-
-        # Store session state (Connected by default)
-        self.sessions[tab_id] = {"name": session_name, "status": "Connected"}
-
-        # Label inside the tab to display session name
-        session_label = ttk.Label(session_frame, text=f"Session: {session_name}", font=("Arial", 10))
-        session_label.pack(anchor="w", padx=10, pady=5)
-
-    def disconnect_session(self):
-        """Marks the selected session as disconnected and updates tab image."""
-        tab_id = self.notebook.index(self.notebook.select())  # Get selected tab index
-        if tab_id in self.sessions:
-            self.sessions[tab_id]["status"] = "Disconnected"
-            session_name = self.sessions[tab_id]["name"]
-            self.notebook.tab(tab_id, text=f"{session_name} (Disconnected)", image=self.disconnected_icon)  # Change image
-            self.update_tab_style(tab_id)
-
-    def reconnect_session(self):
-        """Marks the selected session as connected and updates tab image."""
-        tab_id = self.notebook.index(self.notebook.select())  # Get selected tab index
-        if tab_id in self.sessions:
-            self.sessions[tab_id]["status"] = "Connected"
-            session_name = self.sessions[tab_id]["name"]
-            self.notebook.tab(tab_id, text=session_name, image=self.connected_icon)  # Change image back
-            self.update_tab_style(tab_id)
-
-    def update_tab_style(self, tab_id):
-        """Updates tab image based on session status."""
-        if tab_id in self.sessions:
-            session_status = self.sessions[tab_id]["status"]
-            if session_status == "Connected":
-                self.notebook.tab(tab_id, image=self.connected_icon)
-            elif session_status == "Disconnected":
-                self.notebook.tab(tab_id, image=self.disconnected_icon)
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = FixClientSimulator(master=root)
-    app.pack(fill="both", expand=True)
-    root.mainloop()
+        # Run Button
