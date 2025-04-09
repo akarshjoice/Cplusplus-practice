@@ -1,5 +1,4 @@
-delete(0, tk.END)
-   import tkinter as tk
+import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox, Toplevel, filedialog
 import socket
@@ -9,6 +8,8 @@ import time
 import sys
 import json
 import os
+import requests
+import pandas as pd
 
 class RegressionManager:
     def __init__(self, client_socket=None, regression_queue=None, status_callback=None, lock=None):
@@ -19,29 +20,63 @@ class RegressionManager:
         self.is_running = False
         self.stop_event = threading.Event()
         
-        # Load test cases from config file
-        config_file = "test_cases.json"
-        if os.path.exists(config_file):
-            with open(config_file, "r") as f:
-                self.test_cases = json.load(f)
-        else:
-            self.test_cases = [
-                {"name": "Market Order", "symbol": "AAPL", "price": "150", "qty": "100", "ordertype": "1", "expected": "Order Accepted"},
-                {"name": "Limit Order", "symbol": "GOOG", "price": "2000", "qty": "50", "ordertype": "2", "expected": "Order Accepted"},
-                {"name": "Invalid Price", "symbol": "MSFT", "price": "-10", "qty": "100", "ordertype": "1", "expected": "Order Rejected"},
-            ]
-            with open(config_file, "w") as f:
-                json.dump(self.test_cases, f, indent=4)
-        
+        self.test_cases = []
         self.results = {"total": 0, "pass": 0, "fail": 0, "running": False}
+
+    def load_test_cases(self, file_path):
+        if os.path.exists(file_path):
+            try:
+                df = pd.read_excel(file_path)
+                # Parse InputField and ExpOrdStat JSON
+                df['InputField'] = df['InputField'].apply(json.loads)
+                df['ExpOrdStat'] = df['ExpOrdStat'].apply(json.loads)
+                self.test_cases = df[['Category', 'Id', 'Description', 'InputField', 'ExpOrdStat']].to_dict(orient="records")
+                return True
+            except Exception as e:
+                if self.status_callback:
+                    self.status_callback("", "Error", f"Failed to load Excel file: {str(e)}")
+                return False
+        return False
+
+    def save_test_cases(self, file_path):
+        try:
+            df = pd.DataFrame(self.test_cases)
+            # Convert InputField dict to JSON string for Excel
+            df['InputField'] = df['InputField'].apply(json.dumps)
+            df.to_excel(file_path, index=False)
+        except Exception as e:
+            if self.status_callback:
+                self.status_callback("", "Error", f"Failed to save Excel file: {str(e)}")
+
+    def fetch_api_data(self, symbol):
+        try:
+            response = requests.get(f"https://api.example.com/price?symbol={symbol}", timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            return {"Price": data.get("price", "0"), "MaxQty": data.get("max_qty", "1000")}
+        except Exception as e:
+            if self.status_callback:
+                self.status_callback("", "Error", f"API call failed: {str(e)}")
+            return {"Price": "0", "MaxQty": "1000"}
+
+    def replace_placeholders(self, input_field):
+        fields = input_field.copy()
+        symbol = fields.get("Symbol", "")
+        if any("{Price}" in str(v) or "{MaxQty}" in str(v) for v in fields.values()):
+            api_data = self.fetch_api_data(symbol)
+            try:
+                for k, v in fields.items():
+                    if isinstance(v, str):
+                        fields[k] = v.format(**api_data)
+            except KeyError as e:
+                if self.status_callback:
+                    self.status_callback("", "Error", f"Missing key in API data for {str(e)}")
+        return ";".join(f"{k}={v}" for k, v in fields.items())
 
     def update_status(self, test_name, status, details=""):
         with self.lock:
             if self.status_callback:
                 self.status_callback(test_name, status, details, self.results)
-            else:
-                summary = f"Total: {self.results['total']}, Pass: {self.results['pass']}, Fail: {self.results['fail']}"
-                print(f"{test_name}: {status} - {details} | {summary}")
 
     def run_regression(self, selected_tests=None):
         with self.lock:
@@ -58,18 +93,21 @@ class RegressionManager:
                 self.is_running = False
             return False
 
-        selected_tests = selected_tests or [test["name"] for test in self.test_cases]
+        selected_tests = selected_tests or [f"{test['Category']}_{test['Id']}" for test in self.test_cases]
         total_tests = len(selected_tests)
         self.update_status("", "Running", f"Starting regression tests ({total_tests} tests selected)")
         
         try:
-            for test in [t for t in self.test_cases if t["name"] in selected_tests]:
+            for test in self.test_cases:
+                test_name = f"{test['Category']}_{test['Id']}"
+                if test_name not in selected_tests:
+                    continue
                 if self.stop_event.is_set():
                     self.update_status("", "Stopped", "Regression stopped by user")
                     break
 
-                self.update_status(test["name"], "Running", "")
-                message = f"Symbol={test['symbol']};Price={test['price']};Qty={test['qty']};OrderType={test['ordertype']}"
+                self.update_status(test_name, "Running", "")
+                message = self.replace_placeholders(test["InputField"])
                 with self.lock:
                     if not self.client_socket:
                         raise ConnectionError("Server disconnected")
@@ -78,15 +116,19 @@ class RegressionManager:
                 try:
                     response = self.regression_queue.get(timeout=2)
                 except queue.Empty:
-                    raise ConnectionError("No response from server - connection may be lost")
+                    raise ConnectionError("No response from server")
                 with self.lock:
                     self.results["total"] += 1
-                    if test["expected"] in response:
+                    exp_statuses = test["ExpOrdStat"]
+                    response_dict = dict(f.split("=") for f in response.split(";"))
+                    all_pass = all(any(fc[k] == v for k, v in exp["FieldCheck"].items()) 
+                                 for exp in exp_statuses for fc in [response_dict])
+                    if all_pass:
                         self.results["pass"] += 1
-                        self.update_status(test["name"], "Pass", response)
+                        self.update_status(test_name, "Pass", f"{response} (Sent: {message})")
                     else:
                         self.results["fail"] += 1
-                        self.update_status(test["name"], "Fail", f"Expected {test['expected']}, got {response}")
+                        self.update_status(test_name, "Fail", f"Expected {exp_statuses}, got {response} (Sent: {message})")
         except Exception as e:
             with self.lock:
                 self.is_running = False
@@ -111,121 +153,91 @@ class RegressionManager:
         with self.lock:
             return self.is_running
 
-class RegressionRunnerCLI:
-    def __init__(self, host='localhost', port=5000, test_cases=None):
-        self.host = host
-        self.port = port
-        self.test_cases = test_cases
-        self.client_socket = None
-        self.regression_queue = queue.Queue()
-        self.regression_manager = RegressionManager(self.client_socket, self.regression_queue)
-
-    def connect(self):
-        try:
-            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.client_socket.connect((self.host, self.port))
-            self.regression_manager.client_socket = self.client_socket
-            print("Connected to server")
-            return True
-        except Exception as e:
-            print(f"Error connecting to server: {e}")
-            return False
-
-    def receive_messages(self):
-        while True:
-            try:
-                data = self.client_socket.recv(1024).decode()
-                if data:
-                    self.regression_queue.put(data)
-                else:
-                    break
-            except Exception as e:
-                print(f"Error receiving message: {e}")
-                break
-
-    def run(self):
-        if not self.connect():
-            return False
-
-        receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
-        receive_thread.start()
-
-        success = self.regression_manager.run_regression(self.test_cases)
-        self.client_socket.close()
-        return success
-
 class RegressionTab(tk.Frame):
     def __init__(self, parent, regression_manager, notebook, message_log_callback):
         super().__init__(parent)
         self.regression_manager = regression_manager
         self.notebook = notebook
         self.message_log_callback = message_log_callback
+        self.test_logs = {}
+        self.testcase_file = "test_cases.xlsx"
         self.setup_ui()
 
     def setup_ui(self):
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(3, weight=1)
+        self.grid_rowconfigure(1, weight=1)
 
-        # Row 0: Control frame
-        self.regression_control_frame = ttk.Frame(self)
-        self.regression_control_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
-        self.regression_control_frame.grid_columnconfigure(0, weight=1)
+        self.section1_frame = ttk.Frame(self)
+        self.section1_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self.section1_frame.grid_columnconfigure(0, weight=1)
+        self.section1_frame.grid_rowconfigure(4, weight=1)
 
-        self.run_regression_button = ttk.Button(self.regression_control_frame, 
-                                              text="Run Regression", 
-                                              command=self.show_regression_dialog)
-        self.run_regression_button.grid(row=0, column=0, padx=5, sticky="w")
+        self.control_frame = ttk.Frame(self.section1_frame)
+        self.control_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        ttk.Button(self.control_frame, text="Load Test Cases", command=self.load_test_cases).grid(row=0, column=0, padx=5)
+        ttk.Button(self.control_frame, text="Add Test Case", command=self.add_test_case).grid(row=0, column=1, padx=5)
+        ttk.Button(self.control_frame, text="Run Regression", command=self.show_regression_dialog).grid(row=0, column=2, padx=5)
+        ttk.Button(self.control_frame, text="Stop Regression", command=self.stop_regression).grid(row=0, column=3, padx=5)
+        ttk.Button(self.control_frame, text="Save Test Cases", command=self.save_test_cases).grid(row=0, column=4, padx=5)
 
-        self.stop_regression_button = ttk.Button(self.regression_control_frame, 
-                                               text="Stop Regression", 
-                                               command=self.stop_regression)
-        self.stop_regression_button.grid(row=0, column=1, padx=5, sticky="w")
-
-        # Row 1: Summary frame
-        self.regression_summary_frame = ttk.Frame(self)
-        self.regression_summary_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=2)
-        self.regression_summary_frame.grid_columnconfigure(0, weight=1)
-
-        self.total_label = ttk.Label(self.regression_summary_frame, text="Total: 0")
+        self.summary_frame = ttk.Frame(self.section1_frame)
+        self.summary_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=2)
+        self.total_label = ttk.Label(self.summary_frame, text="Total: 0")
         self.total_label.grid(row=0, column=0, padx=5, sticky="w")
-
-        self.pass_label = ttk.Label(self.regression_summary_frame, text="Pass: 0")
+        self.pass_label = ttk.Label(self.summary_frame, text="Pass: 0")
         self.pass_label.grid(row=0, column=1, padx=5, sticky="w")
-
-        self.fail_label = ttk.Label(self.regression_summary_frame, text="Fail: 0")
+        self.fail_label = ttk.Label(self.summary_frame, text="Fail: 0")
         self.fail_label.grid(row=0, column=2, padx=5, sticky="w")
 
-        # Row 2: Progress bar
-        self.progress = ttk.Progressbar(self, length=200, mode='determinate')
+        self.progress = ttk.Progressbar(self.section1_frame, length=200, mode='determinate')
         self.progress.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
 
-        # Row 3: Status Treeview
-        self.status_tree = ttk.Treeview(self, 
-                                      columns=("Test", "Status", "Details"), 
-                                      show="headings")
+        self.testcase_tree = ttk.Treeview(self.section1_frame, columns=("Name", "Description", "Input", "Expected"), show="headings")
+        self.testcase_tree.heading("Name", text="Test Case Name")
+        self.testcase_tree.heading("Description", text="Description")
+        self.testcase_tree.heading("Input", text="Input Fields")
+        self.testcase_tree.heading("Expected", text="Expected Output")
+        self.testcase_tree.column("Name", width=100)
+        self.testcase_tree.column("Description", width=150)
+        self.testcase_tree.column("Input", width=150)
+        self.testcase_tree.column("Expected", width=100)
+        self.testcase_tree.grid(row=3, column=0, sticky="nsew", padx=5, pady=5)
+        self.testcase_tree.bind("<Double-1>", self.edit_test_case)
+
+        self.status_tree = ttk.Treeview(self.section1_frame, columns=("Test", "Status", "Details"), show="headings")
         self.status_tree.heading("Test", text="Test Case")
         self.status_tree.heading("Status", text="Status")
         self.status_tree.heading("Details", text="Details")
         self.status_tree.column("Test", width=100)
         self.status_tree.column("Status", width=60)
         self.status_tree.column("Details", width=300)
-        self.status_tree.grid(row=3, column=0, sticky="nsew", padx=5, pady=5)
-        
+        self.status_tree.grid(row=4, column=0, sticky="nsew", padx=5, pady=5)
         self.status_tree.tag_configure("Running", background="yellow")
         self.status_tree.tag_configure("Pass", background="lightgreen")
         self.status_tree.tag_configure("Fail", background="salmon")
         self.status_tree.tag_configure("Complete", background="lightgray")
+        self.status_tree.bind("<ButtonRelease-1>", self.on_tree_select)
 
-        # Initial button state
+        self.details_notebook = ttk.Notebook(self)
+        self.details_notebook.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        self.description_frame = ttk.Frame(self.details_notebook)
+        self.details_notebook.add(self.description_frame, text="Description")
+        self.description_text = tk.Text(self.description_frame, height=10, wrap="word", state="disabled")
+        self.description_text.pack(fill="both", expand=True, padx=5, pady=5)
+        self.log_frame = ttk.Frame(self.details_notebook)
+        self.details_notebook.add(self.log_frame, text="Log")
+        self.log_text = tk.Text(self.log_frame, height=10, wrap="word", state="disabled")
+        self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
+
         self.update_button_states()
 
     def update_button_states(self):
         if self.regression_manager.is_regression_running():
-            self.run_regression_button.config(state="disabled")
-            self.stop_regression_button.config(state="normal")
+            self.control_frame.winfo_children()[2].config(state="disabled")
+            self.control_frame.winfo_children()[3].config(state="normal")
         else:
-            self.run_regression_button.config(state="normal")
-            self.stop_regression_button.config(state="disabled")
+            self.control_frame.winfo_children()[2].config(state="normal")
+            self.control_frame.winfo_children()[3].config(state="disabled")
 
     def update_regression_status(self, test_name, status, details, results):
         self.total_label.config(text=f"Total: {results['total']}")
@@ -240,13 +252,335 @@ class RegressionTab(tk.Frame):
             for item in self.status_tree.get_children():
                 if self.status_tree.item(item, "values")[0] == test_name:
                     self.status_tree.item(item, values=(test_name, status, details), tags=(status,))
-                    return
-            self.status_tree.insert("", "end", values=(test_name, status, details), tags=(status,))
+                    break
+            else:
+                self.status_tree.insert("", "end", values=(test_name, status, details), tags=(status,))
+            if test_name not in self.test_logs:
+                self.test_logs[test_name] = []
+            self.test_logs[test_name].append(f"{time.strftime('%H:%M:%S')} - {status}: {details}")
         else:
             self.status_tree.insert("", "end", values=("", status, details), tags=(status,))
 
         self.message_log_callback(f"Regression - {test_name}: {status} - {details}")
         self.update_button_states()
+
+    def on_tree_select(self, event):
+        selected_item = self.status_tree.selection()
+        if not selected_item:
+            return
+
+        test_name = self.status_tree.item(selected_item[0], "values")[0]
+        self.description_text.config(state="normal")
+        self.description_text.delete(1.0, tk.END)
+        self.log_text.config(state="normal")
+        self.log_text.delete(1.0, tk.END)
+
+        if test_name:
+            test_case = next((t for t in self.regression_manager.test_cases if f"{t['Category']}_{t['Id']}" == test_name), None)
+            if test_case:
+                description = (f"Name: {test_name}\n"
+                              f"Description: {test_case['Description']}\n"
+                              f"Input Fields: {self.format_input_field(test_case['InputField'])}\n"
+                              f"Expected Output: {json.dumps(test_case['ExpOrdStat'], indent=2)}")
+                self.description_text.insert(tk.END, description)
+            if test_name in self.test_logs:
+                self.log_text.insert(tk.END, "\n".join(self.test_logs[test_name]))
+        else:
+            self.description_text.insert(tk.END, "No test case selected or non-test entry.")
+            self.log_text.insert(tk.END, "N/A")
+
+        self.description_text.config(state="disabled")
+        self.log_text.config(state="disabled")
+
+    def format_input_field(self, input_field):
+        return ";".join(f"{k}={v}" for k, v in input_field.items())
+
+    def load_test_cases(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")], initialfile=self.testcase_file)
+        if file_path:
+            if self.regression_manager.load_test_cases(file_path):
+                self.testcase_file = file_path
+                self.testcase_tree.delete(*self.testcase_tree.get_children())
+                for test in self.regression_manager.test_cases:
+                    name = f"{test['Category']}_{test['Id']}"
+                    self.testcase_tree.insert("", "end", values=(name, test["Description"], 
+                                                               self.format_input_field(test["InputField"]), json.dumps(test["ExpOrdStat"])))
+                self.message_log_callback(f"Loaded test cases from {file_path}")
+            else:
+                messagebox.showerror("Error", "Failed to load test cases")
+
+    def save_test_cases(self):
+        file_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")], 
+                                               initialfile=self.testcase_file)
+        if file_path:
+            self.regression_manager.save_test_cases(file_path)
+            self.testcase_file = file_path
+            self.message_log_callback(f"Saved test cases to {file_path}")
+
+    def add_test_case(self):
+        self.show_test_case_dialog("Add Test Case", None)
+
+    def edit_test_case(self, event):
+        selected_item = self.testcase_tree.selection()
+        if not selected_item:
+            return
+        test_name = self.testcase_tree.item(selected_item[0], "values")[0]
+        test_case = next((t for t in self.regression_manager.test_cases if f"{t['Category']}_{t['Id']}" == test_name), None)
+        self.show_test_case_dialog("Edit Test Case", test_case, selected_item[0])
+
+    def show_test_case_dialog(self, title, test_case=None, item_id=None):
+        dialog = Toplevel(self)
+        dialog.title(title)
+        dialog.geometry("600x700")
+        dialog.grid_columnconfigure(1, weight=1)
+
+        # Basic Fields
+        ttk.Label(dialog, text="Category:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        category_entry = ttk.Entry(dialog)
+        category_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        
+        ttk.Label(dialog, text="Id:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        id_entry = ttk.Entry(dialog)
+        id_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        
+        ttk.Label(dialog, text="Description:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        desc_entry = ttk.Entry(dialog)
+        desc_entry.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+
+        # Dynamic InputField Editor
+        ttk.Label(dialog, text="Input Fields:").grid(row=3, column=0, columnspan=2, pady=5)
+        input_frame = ttk.LabelFrame(dialog, text="Input Fields")
+        input_frame.grid(row=4, column=0, columnspan=2, padx=5, pady=5, sticky="nsew")
+        input_frame.grid_columnconfigure(0, weight=1)
+        input_frame.grid_rowconfigure(0, weight=1)
+
+        input_tree = ttk.Treeview(input_frame, columns=("Key", "Value"), show="headings", height=5)
+        input_tree.heading("Key", text="Key")
+        input_tree.heading("Value", text="Value")
+        input_tree.column("Key", width=100)
+        input_tree.column("Value", width=200)
+        input_tree.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        # InputField Buttons
+        input_btn_frame = ttk.Frame(input_frame)
+        input_btn_frame.grid(row=1, column=0, pady=5)
+
+        def add_input_entry():
+            input_dialog = Toplevel(dialog)
+            input_dialog.title("Add Input Field")
+            input_dialog.geometry("300x200")
+
+            ttk.Label(input_dialog, text="Key:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+            key_entry = ttk.Entry(input_dialog)
+            key_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+
+            ttk.Label(input_dialog, text="Value:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+            value_entry = ttk.Entry(input_dialog)
+            value_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+
+            def save_input():
+                key = key_entry.get().strip()
+                value = value_entry.get().strip()
+                if not key or not value:
+                    messagebox.showwarning("Warning", "Please fill in both fields")
+                    return
+                if any(input_tree.item(item, "values")[0] == key for item in input_tree.get_children()):
+                    messagebox.showwarning("Warning", "Key already exists")
+                    return
+                input_tree.insert("", "end", values=(key, value))
+                input_dialog.destroy()
+
+            ttk.Button(input_dialog, text="Save", command=save_input).grid(row=2, column=0, columnspan=2, pady=10)
+
+        def edit_input_entry():
+            selected = input_tree.selection()
+            if not selected:
+                messagebox.showwarning("Warning", "Select an entry to edit")
+                return
+            key, value = input_tree.item(selected[0], "values")
+
+            input_dialog = Toplevel(dialog)
+            input_dialog.title("Edit Input Field")
+            input_dialog.geometry("300x200")
+
+            ttk.Label(input_dialog, text="Key:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+            key_entry = ttk.Entry(input_dialog)
+            key_entry.insert(0, key)
+            key_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+
+            ttk.Label(input_dialog, text="Value:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+            value_entry = ttk.Entry(input_dialog)
+            value_entry.insert(0, value)
+            value_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+
+            def save_edit():
+                new_key = key_entry.get().strip()
+                new_value = value_entry.get().strip()
+                if not new_key or not new_value:
+                    messagebox.showwarning("Warning", "Please fill in both fields")
+                    return
+                if new_key != key and any(input_tree.item(item, "values")[0] == new_key for item in input_tree.get_children()):
+                    messagebox.showwarning("Warning", "Key already exists")
+                    return
+                input_tree.item(selected[0], values=(new_key, new_value))
+                input_dialog.destroy()
+
+            ttk.Button(input_dialog, text="Save", command=save_edit).grid(row=2, column=0, columnspan=2, pady=10)
+
+        def delete_input_entry():
+            selected = input_tree.selection()
+            if not selected:
+                messagebox.showwarning("Warning", "Select an entry to delete")
+                return
+            input_tree.delete(selected[0])
+
+        ttk.Button(input_btn_frame, text="Add", command=add_input_entry).grid(row=0, column=0, padx=5)
+        ttk.Button(input_btn_frame, text="Edit", command=edit_input_entry).grid(row=0, column=1, padx=5)
+        ttk.Button(input_btn_frame, text="Delete", command=delete_input_entry).grid(row=0, column=2, padx=5)
+
+        # ExpOrdStat Editor
+        ttk.Label(dialog, text="Expected Order Status:").grid(row=5, column=0, columnspan=2, pady=5)
+        exp_frame = ttk.LabelFrame(dialog, text="ExpOrdStat")
+        exp_frame.grid(row=6, column=0, columnspan=2, padx=5, pady=5, sticky="nsew")
+        exp_frame.grid_columnconfigure(0, weight=1)
+        exp_frame.grid_rowconfigure(0, weight=1)
+
+        exp_tree = ttk.Treeview(exp_frame, columns=("Path", "FieldCheck"), show="headings", height=5)
+        exp_tree.heading("Path", text="Path")
+        exp_tree.heading("FieldCheck", text="FieldCheck (Key=Value)")
+        exp_tree.column("Path", width=100)
+        exp_tree.column("FieldCheck", width=200)
+        exp_tree.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        # ExpOrdStat Buttons
+        exp_btn_frame = ttk.Frame(exp_frame)
+        exp_btn_frame.grid(row=1, column=0, pady=5)
+
+        def add_exp_entry():
+            exp_dialog = Toplevel(dialog)
+            exp_dialog.title("Add ExpOrdStat Entry")
+            exp_dialog.geometry("300x200")
+
+            ttk.Label(exp_dialog, text="Path:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+            path_entry = ttk.Entry(exp_dialog)
+            path_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+
+            ttk.Label(exp_dialog, text="FieldCheck (e.g., Msgtype=NewOrder):").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+            fieldcheck_entry = ttk.Entry(exp_dialog)
+            fieldcheck_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+
+            def save_exp():
+                path = path_entry.get().strip()
+                fieldcheck_str = fieldcheck_entry.get().strip()
+                if not path or not fieldcheck_str:
+                    messagebox.showwarning("Warning", "Please fill in both fields")
+                    return
+                try:
+                    fieldcheck = dict(f.split("=") for f in fieldcheck_str.split(";"))
+                except ValueError:
+                    messagebox.showwarning("Warning", "FieldCheck must be in 'Key=Value' format (semicolon-separated for multiple)")
+                    return
+                exp_tree.insert("", "end", values=(path, fieldcheck_str))
+                exp_dialog.destroy()
+
+            ttk.Button(exp_dialog, text="Save", command=save_exp).grid(row=2, column=0, columnspan=2, pady=10)
+
+        def edit_exp_entry():
+            selected = exp_tree.selection()
+            if not selected:
+                messagebox.showwarning("Warning", "Select an entry to edit")
+                return
+            path, fieldcheck_str = exp_tree.item(selected[0], "values")
+
+            exp_dialog = Toplevel(dialog)
+            exp_dialog.title("Edit ExpOrdStat Entry")
+            exp_dialog.geometry("300x200")
+
+            ttk.Label(exp_dialog, text="Path:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+            path_entry = ttk.Entry(exp_dialog)
+            path_entry.insert(0, path)
+            path_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+
+            ttk.Label(exp_dialog, text="FieldCheck (e.g., Msgtype=NewOrder):").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+            fieldcheck_entry = ttk.Entry(exp_dialog)
+            fieldcheck_entry.insert(0, fieldcheck_str)
+            fieldcheck_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+
+            def save_edit():
+                new_path = path_entry.get().strip()
+                new_fieldcheck_str = fieldcheck_entry.get().strip()
+                if not new_path or not new_fieldcheck_str:
+                    messagebox.showwarning("Warning", "Please fill in both fields")
+                    return
+                try:
+                    dict(f.split("=") for f in new_fieldcheck_str.split(";"))
+                except ValueError:
+                    messagebox.showwarning("Warning", "FieldCheck must be in 'Key=Value' format (semicolon-separated for multiple)")
+                    return
+                exp_tree.item(selected[0], values=(new_path, new_fieldcheck_str))
+                exp_dialog.destroy()
+
+            ttk.Button(exp_dialog, text="Save", command=save_edit).grid(row=2, column=0, columnspan=2, pady=10)
+
+        def delete_exp_entry():
+            selected = exp_tree.selection()
+            if not selected:
+                messagebox.showwarning("Warning", "Select an entry to delete")
+                return
+            exp_tree.delete(selected[0])
+
+        ttk.Button(exp_btn_frame, text="Add", command=add_exp_entry).grid(row=0, column=0, padx=5)
+        ttk.Button(exp_btn_frame, text="Edit", command=edit_exp_entry).grid(row=0, column=1, padx=5)
+        ttk.Button(exp_btn_frame, text="Delete", command=delete_exp_entry).grid(row=0, column=2, padx=5)
+
+        # Populate existing data
+        if test_case:
+            category_entry.insert(0, test_case["Category"])
+            id_entry.insert(0, test_case["Id"])
+            desc_entry.insert(0, test_case["Description"])
+            for key, value in test_case["InputField"].items():
+                input_tree.insert("", "end", values=(key, value))
+            for exp in test_case["ExpOrdStat"]:
+                fieldcheck_str = ";".join(f"{k}={v}" for k, v in exp["FieldCheck"].items())
+                exp_tree.insert("", "end", values=(exp["Path"], fieldcheck_str))
+
+        def save_test_case():
+            category = category_entry.get().strip()
+            id_val = id_entry.get().strip()
+            desc = desc_entry.get().strip()
+            input_field = {input_tree.item(item, "values")[0]: input_tree.item(item, "values")[1] 
+                          for item in input_tree.get_children()}
+            exp_entries = []
+            for item in exp_tree.get_children():
+                path, fieldcheck_str = exp_tree.item(item, "values")
+                fieldcheck = dict(f.split("=") for f in fieldcheck_str.split(";"))
+                exp_entries.append({"Path": path, "FieldCheck": fieldcheck})
+
+            if not all([category, id_val, desc, input_field, exp_entries]):
+                messagebox.showwarning("Warning", "Please fill in all required fields")
+                return
+
+            name = f"{category}_{id_val}"
+            if test_case and name != f"{test_case['Category']}_{test_case['Id']}" and any(f"{t['Category']}_{t['Id']}" == name for t in self.regression_manager.test_cases):
+                messagebox.showwarning("Warning", "Test case name already exists")
+                return
+            if not test_case and any(f"{t['Category']}_{t['Id']}" == name for t in self.regression_manager.test_cases):
+                messagebox.showwarning("Warning", "Test case name already exists")
+                return
+
+            new_test = {"Category": category, "Id": id_val, "Description": desc, "InputField": input_field, "ExpOrdStat": exp_entries}
+            if test_case and item_id:
+                idx = self.regression_manager.test_cases.index(test_case)
+                self.regression_manager.test_cases[idx] = new_test
+                self.testcase_tree.item(item_id, values=(name, desc, self.format_input_field(input_field), json.dumps(exp_entries)))
+                self.message_log_callback(f"Edited test case: {name}")
+            else:
+                self.regression_manager.test_cases.append(new_test)
+                self.testcase_tree.insert("", "end", values=(name, desc, self.format_input_field(input_field), json.dumps(exp_entries)))
+                self.message_log_callback(f"Added test case: {name}")
+            dialog.destroy()
+
+        ttk.Button(dialog, text="Save", command=save_test_case).grid(row=7, column=0, columnspan=2, pady=10)
 
     def show_regression_dialog(self):
         if not self.regression_manager.client_socket:
@@ -259,55 +593,62 @@ class RegressionTab(tk.Frame):
 
         dialog = Toplevel(self)
         dialog.title("Run Regression Tests")
-        dialog.geometry("400x300")
+        dialog.geometry("400x400")
+        dialog.grid_columnconfigure(1, weight=1)
 
-        tk.Label(dialog, text="Select Test Cases:").pack(pady=5)
-        
-        test_listbox = tk.Listbox(dialog, selectmode="multiple")
+        ttk.Label(dialog, text="Username:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        username_entry = ttk.Entry(dialog)
+        username_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        username_entry.insert(0, "user1")
+
+        ttk.Label(dialog, text="Log Server IP:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        logserverip_entry = ttk.Entry(dialog)
+        logserverip_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        logserverip_entry.insert(0, "192.168.1.100")
+
+        ttk.Label(dialog, text="Select Test Cases:").grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="w")
+        test_listbox = tk.Listbox(dialog, selectmode="multiple", height=10)
         for test in self.regression_manager.test_cases:
-            test_listbox.insert(tk.END, test["name"])
-        test_listbox.pack(pady=5, fill="both", expand=True)
+            test_listbox.insert(tk.END, f"{test['Category']}_{test['Id']}")
+        test_listbox.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky="nsew")
+        dialog.grid_rowconfigure(3, weight=1)
+
+        select_all_button = ttk.Button(dialog, text="Select All", command=lambda: test_listbox.select_set(0, tk.END))
+        select_all_button.grid(row=4, column=0, padx=5, pady=5, sticky="w")
+        deselect_all_button = ttk.Button(dialog, text="Deselect All", command=lambda: test_listbox.selection_clear(0, tk.END))
+        deselect_all_button.grid(row=4, column=1, padx=5, pady=5, sticky="e")
 
         def run_tests():
+            username = username_entry.get()
+            logserverip = logserverip_entry.get()
             selected_indices = test_listbox.curselection()
             selected_tests = [test_listbox.get(i) for i in selected_indices]
-            if selected_tests:
-                self.status_tree.delete(*self.status_tree.get_children())
-                self.progress['value'] = 0
-                self.total_label.config(text="Total: 0")
-                self.pass_label.config(text="Pass: 0")
-                self.fail_label.config(text="Fail: 0")
-                dialog.destroy()
-                threading.Thread(target=self.regression_manager.run_regression, 
-                               args=(selected_tests,), daemon=True).start()
-                self.notebook.select(self)
-            else:
-                messagebox.showwarning("Warning", "Please select at least one test case")
 
-        ttk.Button(dialog, text="Run", command=run_tests).pack(pady=10)
+            if not username or not logserverip:
+                messagebox.showwarning("Warning", "Please enter both username and log server IP.")
+                return
+            if not selected_tests:
+                messagebox.showwarning("Warning", "Please select at least one test case.")
+                return
+
+            self.message_log_callback(f"Starting regression with Username: {username}, Log Server IP: {logserverip}")
+            self.status_tree.delete(*self.status_tree.get_children())
+            self.test_logs.clear()
+            self.progress['value'] = 0
+            self.total_label.config(text="Total: 0")
+            self.pass_label.config(text="Pass: 0")
+            self.fail_label.config(text="Fail: 0")
+            dialog.destroy()
+            threading.Thread(target=self.regression_manager.run_regression, args=(selected_tests,), daemon=True).start()
+            self.notebook.select(self)
+
+        ttk.Button(dialog, text="Run", command=run_tests).grid(row=5, column=0, columnspan=2, pady=10)
 
     def stop_regression(self):
         if self.regression_manager.is_regression_running():
             self.regression_manager.stop_regression()
         else:
             messagebox.showinfo("Info", "No regression is currently running")
-
-    def save_results(self):
-        if not self.regression_manager.results["total"]:
-            messagebox.showinfo("Info", "No results to save")
-            return
-        file_path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json")])
-        if file_path:
-            with open(file_path, 'w') as f:
-                json.dump(self.regression_manager.results, f, indent=4)
-            self.message_log_callback(f"Saved results to {file_path}")
-
-    def load_results(self):
-        file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
-        if file_path:
-            with open(file_path, 'r') as f:
-                results = json.load(f)
-            self.update_regression_status("", "Loaded", f"Results from {file_path}", results)
 
 class FixClientSimulator(tk.Frame):
     def __init__(self, master=None):
@@ -321,18 +662,12 @@ class FixClientSimulator(tk.Frame):
         self.general_queue = queue.Queue()
         self.regression_queue = queue.Queue()
         self.lock = threading.Lock()
-        self.regression_manager = RegressionManager(
-            self.client_socket, 
-            self.regression_queue, 
-            None, 
-            self.lock
-        )
+        self.regression_manager = RegressionManager(self.client_socket, self.regression_queue, None, self.lock)
 
         self.setup_menu()
         self.setup_ui()
         self.process_queue()
-
-    def setup_menu(self):
+   def setup_menu(self):
         menubar = tk.Menu(self.master)
         self.master.config(menu=menubar)
 
@@ -343,8 +678,8 @@ class FixClientSimulator(tk.Frame):
         test_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Tests", menu=test_menu)
         test_menu.add_command(label="Run Regression", command=lambda: self.regression_tab.show_regression_dialog())
-        test_menu.add_command(label="Save Results", command=self.regression_tab.save_results)
-        test_menu.add_command(label="Load Results", command=self.regression_tab.load_results)
+        test_menu.add_command(label="Load Test Cases", command=self.regression_tab.load_test_cases)
+        test_menu.add_command(label="Save Test Cases", command=self.regression_tab.save_test_cases)
 
     def setup_ui(self):
         self.grid(row=0, column=0, sticky="nsew")
@@ -356,7 +691,6 @@ class FixClientSimulator(tk.Frame):
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
 
-        # Order Entry Tab
         self.order_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.order_tab, text="Order Entry")
         
@@ -395,7 +729,6 @@ class FixClientSimulator(tk.Frame):
         self.send_button = ttk.Button(self.fix_fields_frame, text="Send", command=self.send_message)
         self.send_button.grid(row=4, columnspan=2, pady=10)
 
-        # Messages Tab
         self.message_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.message_tab, text="Messages")
         
@@ -404,12 +737,10 @@ class FixClientSimulator(tk.Frame):
         self.message_info_text = tk.Text(self.message_info_frame, height=10, wrap="word")
         self.message_info_text.pack(fill="both", expand=True)
 
-        # Regression Tab
         self.regression_tab = RegressionTab(self.notebook, self.regression_manager, self.notebook, self.log_to_messages)
         self.regression_manager.status_callback = self.regression_tab.update_regression_status
         self.notebook.add(self.regression_tab, text="Regression")
 
-        # Connection Status Indicator
         self.status_frame = ttk.Frame(self)
         self.status_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=2)
         self.connection_status = ttk.Label(self.status_frame, text="Disconnected")
@@ -517,16 +848,7 @@ class FixClientSimulator(tk.Frame):
         pass
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--no-gui":
-        host = sys.argv[2] if len(sys.argv) > 2 else 'localhost'
-        port = int(sys.argv[3]) if len(sys.argv) > 3 else 5000
-        test_cases = sys.argv[4:] if len(sys.argv) > 4 else None
-        
-        runner = RegressionRunnerCLI(host, port, test_cases)
-        success = runner.run()
-        sys.exit(0 if success else 1)
-    else:
-        root = tk.Tk()
-        app = FixClientSimulator(master=root)
-        app.pack(fill="both", expand=True)
-        root.mainloop()
+    root = tk.Tk()
+    app = FixClientSimulator(master=root)
+    app.pack(fill="both", expand=True)
+    root.mainloop()
