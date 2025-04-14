@@ -1,0 +1,199 @@
+{
+  "testSuite": "FIX_Client_Simulator_Tests",
+  "version": "1.1",
+  "description": "Comprehensive test cases for FIX client simulator message exchange with setup/teardown and performance metrics",
+  "metadata": {
+    "created": "2023-11-15",
+    "author": "Your Name",
+    "fixVersion": "FIX.4.4",
+    "targetEnvironment": "Simulator v2.1"
+  },
+  "commonValidations": {
+    "headerFields": ["8", "9", "35", "49", "56", "34", "52"],
+    "trailerFields": ["10"],
+    "fieldFormats": {
+      "8": {"type": "string", "pattern": "FIX.4.4"},
+      "9": {"type": "numeric", "min": 0},
+      "34": {"type": "numeric", "min": 1},
+      "52": {"type": "timestamp", "format": "YYYYMMDD-HH:MM:SS"}
+    }
+  },
+  "setup": {
+    "preconditions": [
+      "FIX session logged on",
+      "Test instruments loaded (AAPL, MSFT)",
+      "Sequence numbers reset"
+    ],
+    "procedures": [
+      {
+        "action": "connect",
+        "host": "fix.example.com",
+        "port": 9876,
+        "timeoutMs": 3000
+      },
+      {
+        "action": "logon",
+        "credentials": {
+          "username": "testuser",
+          "password": "testpass",
+          "resetSeqNum": "Y"
+        }
+      }
+    ]
+  },
+  "teardown": {
+    "procedures": [
+      {
+        "action": "logout",
+        "timeoutMs": 1000
+      },
+      {
+        "action": "disconnect"
+      },
+      {
+        "action": "cleanup",
+        "files": ["*.tmp", "logs/*.log"]
+      }
+    ]
+  },
+  "tests": [
+    {
+      "testId": "FIX_NEW_ORDER_1",
+      "description": "Send NewOrderSingle and validate ExecutionReport (ACK)",
+      "tags": ["new_order", "basic", "regression"],
+      "priority": "high",
+      "prerequisites": [],
+      "sequence": [
+        {
+          "step": 1,
+          "type": "send",
+          "messageType": "NewOrderSingle",
+          "inputFields": {
+            "11": {"value": "CLORD12345", "description": "Client Order ID"},
+            "55": {"value": "AAPL", "description": "Symbol"},
+            "54": {"value": "1", "description": "Side (1=Buy)"},
+            "38": {"value": "100", "description": "Order Qty"},
+            "40": {"value": "2", "description": "Order Type (2=Limit)"},
+            "44": {"value": "150.25", "description": "Price"}
+          },
+          "validation": {
+            "requiredFields": ["11", "55", "54", "38", "40", "44"],
+            "fieldFormats": {
+              "11": {"type": "string", "minLength": 10},
+              "38": {"type": "numeric", "min": 1},
+              "44": {"type": "decimal", "precision": 2}
+            }
+          },
+          "expectedTimeMs": 50
+        },
+        {
+          "step": 2,
+          "type": "receive",
+          "messageType": "ExecutionReport",
+          "expectedFields": {
+            "35": {"value": "8", "description": "MsgType"},
+            "39": {"value": "0", "description": "OrdStatus (0=New)"},
+            "150": {"value": "0", "description": "ExecType (0=New)"},
+            "37": {"value": "EXEC12345", "description": "OrderID"},
+            "11": {"value": "CLORD12345", "description": "ClOrdID"}
+          },
+          "validationRules": {
+            "fieldPresence": ["35", "39", "150", "37", "11"],
+            "fieldEquality": {
+              "11": "CLORD12345"
+            },
+            "allowedValues": {
+              "39": ["0", "1", "2"],
+              "150": ["0", "1", "2", "4", "8"]
+            },
+            "performance": {
+              "maxResponseTimeMs": 1000
+            }
+          },
+          "timeoutMs": 5000
+        }
+      ]
+    },
+    {
+      "testId": "FIX_CANCEL_ORDER_1",
+      "description": "Send OrderCancelRequest and validate ExecutionReport (CANCEL ACK)",
+      "tags": ["cancel", "basic", "regression", "sanity"],
+      "priority": "high",
+      "prerequisites": ["FIX_NEW_ORDER_1"],
+      "setup": {
+        "actions": [
+          {
+            "type": "wait",
+            "durationMs": 200
+          },
+          {
+            "type": "validate",
+            "check": "lastOrderStatus",
+            "expected": "NEW"
+          }
+        ]
+      },
+      "sequence": [
+        {
+          "step": 1,
+          "type": "send",
+          "messageType": "OrderCancelRequest",
+          "inputFields": {
+            "11": {"value": "CANCEL_12345", "description": "Client Order ID"},
+            "41": {"value": "CLORD12345", "description": "OrigClOrdID"},
+            "55": {"value": "AAPL", "description": "Symbol"},
+            "54": {"value": "1", "description": "Side"},
+            "38": {"value": "100", "description": "Order Qty"}
+          },
+          "expectedTimeMs": 50
+        },
+        {
+          "step": 2,
+          "type": "receive",
+          "messageType": "ExecutionReport",
+          "expectedFields": {
+            "35": {"value": "8", "description": "MsgType"},
+            "39": {"value": "4", "description": "OrdStatus (4=Canceled)"},
+            "150": {"value": "4", "description": "ExecType (4=Canceled)"},
+            "37": {"value": "EXEC12345", "description": "OrderID"},
+            "11": {"value": "CANCEL_12345", "description": "ClOrdID"},
+            "41": {"value": "CLORD12345", "description": "OrigClOrdID"}
+          },
+          "validationRules": {
+            "fieldEquality": {
+              "41": "CLORD12345"
+            },
+            "allowedValues": {
+              "39": ["4"],
+              "150": ["4"]
+            },
+            "performance": {
+              "maxResponseTimeMs": 1500
+            }
+          },
+          "timeoutMs": 5000
+        }
+      ],
+      "teardown": {
+        "actions": [
+          {
+            "type": "log",
+            "message": "Cancel test completed"
+          }
+        ]
+      }
+    }
+  ],
+  "performanceThresholds": {
+    "averageResponseTimeMs": 800,
+    "maxResponseTimeMs": 2000,
+    "throughput": "10 messages/second"
+  },
+  "tags": {
+    "regression": "Tests run in regression suite",
+    "sanity": "Critical path tests",
+    "basic": "Fundamental functionality",
+    "new_order": "New order workflow",
+    "cancel": "Order cancellation"
+  }
+}
