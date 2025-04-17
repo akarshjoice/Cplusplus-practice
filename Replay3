@@ -1,0 +1,163 @@
+import threading
+import queue
+import socket
+import logging
+from scapy.all import PcapReader, TCP, IP
+from contextlib import contextmanager
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+BATCH_SIZE = 100  # Smaller batch size for lower latency
+QUEUE_TIMEOUT = 0.1  # Faster queue polling
+SOCKET_TIMEOUT = 5.0  # Socket operation timeout
+PACKET_QUEUE = queue.Queue(maxsize=5000)
+
+ip_port_map = {
+    ("10.0.0.1", 1234, "10.0.0.2", 5000): ("192.168.1.100", 7000),
+}
+
+sockets = {}
+socket_lock = threading.Lock()
+
+def preconnect_sockets():
+    """Preconnect sockets for all destinations in ip_port_map."""
+    for new_ip, new_port in set(ip_port_map.values()):
+        key = (new_ip, new_port)
+        with socket_lock:
+            if key not in sockets:
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(SOCKET_TIMEOUT)
+                    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)  # Tune buffer size
+                    s.connect((new_ip, new_port))
+                    sockets[key] = s
+                    logging.info(f"Preconnected to {new_ip}:{new_port}")
+                except socket.error as e:
+                    logging.error(f"Failed to preconnect to {new_ip}:{new_port}: {e}")
+
+@contextmanager
+def get_socket(ip, port):
+    """Manage socket access with error handling."""
+    key = (ip, port)
+    with socket_lock:
+        if key not in sockets:
+            logging.warning(f"No preconnected socket for {ip}:{port}, creating new")
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(SOCKET_TIMEOUT)
+            s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+            s.connect((ip, port))
+            sockets[key] = s
+    sock = sockets[key]
+    try:
+        yield sock
+    except socket.error as e:
+        logging.error(f"Socket error for {ip}:{port}: {e}")
+        with socket_lock:
+            sockets.pop(key, None)
+            sock.close()
+        raise
+
+def reader_thread(pcap_file):
+    """Read packets from PCAP and queue payloads."""
+    try:
+        with PcapReader(pcap_file) as reader:
+            for pkt in reader:
+                if IP not in pkt or TCP not in pkt:
+                    continue
+                ip = pkt[IP]
+                tcp = pkt[TCP]
+                payload = bytes(tcp.payload)
+                if not payload:
+                    continue
+                orig_key = (ip.src, tcp.sport, ip.dst, tcp.dport)
+                if orig_key not in ip_port_map:
+                    continue
+                new_ip, new_port = ip_port_map[orig_key]
+                try:
+                    PACKET_QUEUE.put((new_ip, new_port, payload), timeout=QUEUE_TIMEOUT)
+                except queue.Full:
+                    logging.warning("Queue full, dropping packet")
+    except FileNotFoundError:
+        logging.error(f"PCAP file {pcap_file} not found")
+    except Exception as e:
+        logging.error(f"Error reading PCAP: {e}")
+    finally:
+        PACKET_QUEUE.put(None)  # Signal end
+
+def sender_thread():
+    """Send packets in order using a single thread."""
+    batch = []
+    while True:
+        try:
+            # Bulk dequeue up to BATCH_SIZE items
+            for _ in range(BATCH_SIZE):
+                item = PACKET_QUEUE.get(timeout=QUEUE_TIMEOUT)
+                if item is None:
+                    break  # Exit if end signal received
+                batch.append(item)
+        except queue.Empty:
+            pass
+
+        # Send batch sequentially to preserve order
+        for ip, port, data in batch:
+            try:
+                with get_socket(ip, port) as sock:
+                    sock.sendall(data)
+                    logging.debug(f"Sent {len(data)} bytes to {ip}:{port}")
+            except socket.error as e:
+                logging.error(f"Failed to send to {ip}:{port}: {e}")
+                continue  # Continue to maintain order
+        batch.clear()
+
+        # Process any remaining items in queue
+        while not PACKET_QUEUE.empty():
+            try:
+                item = PACKET_QUEUE.get_nowait()
+                if item is None:
+                    break
+                ip, port, data = item
+                try:
+                    with get_socket(ip, port) as sock:
+                        sock.sendall(data)
+                        logging.debug(f"Sent {len(data)} bytes to {ip}:{port}")
+                except socket.error as e:
+                    logging.error(f"Failed to send to {ip}:{port}: {e}")
+                    continue  # Continue to maintain order
+            except queue.Empty:
+                break
+
+def main(pcap_file):
+    """Start reader and sender threads."""
+    try:
+        # Preconnect sockets
+        preconnect_sockets()
+
+        # Start threads
+        t1 = threading.Thread(target=reader_thread, args=(pcap_file,))
+        t2 = threading.Thread(target=sender_thread)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        logging.info("Processing complete")
+    except KeyboardInterrupt:
+        logging.info("Shutting down...")
+        PACKET_QUEUE.put(None)
+        t1.join()
+        t2.join()
+    finally:
+        # Close sockets
+        with socket_lock:
+            for (ip, port), sock in list(sockets.items()):
+                try:
+                    sock.close()
+                    logging.info(f"Closed socket {ip}:{port}")
+                except socket.error as e:
+                    logging.error(f"Error closing socket {ip}:{port}: {e}")
+                sockets.pop((ip, port), None)
+
+if __name__ == "__main__":
+    main("orders.pcap")
