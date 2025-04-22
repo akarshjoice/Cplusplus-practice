@@ -1,75 +1,9 @@
-def show_regression_dialog(self):
-        if not self.regression_manager.client_socket:
-            messagebox.showerror("Error", "Please connect to server first")
-            return
+class SafeDict(dict):
+    def __missing__(self, key):
+        return f'{{{key}}}'  # Keep missing placeholders unchanged
 
-        if self.regression_manager.is_regression_running():
-            messagebox.showwarning("Warning", "Regression is already running")
-            return
-
-        dialog = Toplevel(self)
-        dialog.title("Run Regression Tests")
-        dialog.geometry("400x400")
-        dialog.grid_columnconfigure(1, weight=1)  # Allow entries and listbox to expand horizontally
-
-        # Username
-        ttk.Label(dialog, text="Username:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        username_entry = ttk.Entry(dialog)
-        username_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        username_entry.insert(0, "user1")  # Default value for demonstration
-
-        # Log Server IP
-        ttk.Label(dialog, text="Log Server IP:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        logserverip_entry = ttk.Entry(dialog)
-        logserverip_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-        logserverip_entry.insert(0, "192.168.1.100")  # Default value for demonstration
-
-        # Test Cases Label
-        ttk.Label(dialog, text="Select Test Cases:").grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="w")
-
-        # Test Cases Listbox
-        test_listbox = tk.Listbox(dialog, selectmode="multiple", height=10)
-        for test in self.regression_manager.test_cases:
-            test_listbox.insert(tk.END, test["name"])
-        test_listbox.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky="nsew")
-        dialog.grid_rowconfigure(3, weight=1)  # Allow listbox to expand vertically
-
-        # Select All and Deselect All Buttons
-        select_all_button = ttk.Button(dialog, text="Select All", 
-                                     command=lambda: [test_listbox.select_set(0, tk.END)])
-        select_all_button.grid(row=4, column=0, padx=5, pady=5, sticky="w")
-
-        deselect_all_button = ttk.Button(dialog, text="Deselect All", 
-                                       command=lambda: [test_listbox.selection_clear(0, tk.END)])
-        deselect_all_button.grid(row=4, column=1, padx=5, pady=5, sticky="e")
-
-        # Run Button
-        def run_tests():
-            username = username_entry.get()
-            logserverip = logserverip_entry.get()
-            selected_indices = test_listbox.curselection()
-            selected_tests = [test_listbox.get(i) for i in selected_indices]
-
-            if not username or not logserverip:
-                messagebox.showwarning("Warning", "Please enter both username and log server IP.")
-                return
-
-            if not selected_tests:
-                messagebox.showwarning("Warning", "Please select at least one test case.")
-                return
-
-            # Log the additional inputs for now (could be used later)
-            self.message_log_callback(f"Starting regression with Username: {username}, Log Server IP: {logserverip}")
-
-            self.status_tree.delete(*self.status_tree.get_children())
-            self.test_logs.clear()  # Clear logs for new run
-            self.progress['value'] = 0
-            self.total_label.config(text="Total: 0")
-            self.pass_label.config(text="Pass: 0")
-            self.fail_label.config(text="Fail: 0")
-            dialog.destroy()
-            threading.Thread(target=self.regression_manager.run_regression, 
-                           args=(selected_tests,), daemon=True).start()
-            self.notebook.select(self)
-
-        ttk.Button(dialog, text="Run", command=run_tests).grid(row=5, column=0, columnspan=2, pady=10)
+def partial_format_dict_inplace(template_dict, data):
+    """Updates dictionary values in-place with partial formatting."""
+    for key, value in template_dict.items():
+        if isinstance(value, str):
+            template_dict[key] = value.format_map(SafeDict(data))
