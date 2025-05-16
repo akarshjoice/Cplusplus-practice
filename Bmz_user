@@ -332,3 +332,31 @@ int main() {
     cmph_io_vector_adapter_destroy(source);
     return 0;
 }
+
+murmurhash
+// Standalone MurmurHash3 (must match bmz.c)
+std::uint32_t bmz_raw_murmurhash3(const char *key, std::uint32_t keylen, std::uint32_t seed, std::uint32_t m) {
+    std::uint32_t h1 = seed;
+    const std::uint32_t c1 = 0xcc9e2d51;
+    const std::uint32_t c2 = 0x1b873593;
+
+    for (std::uint32_t i = 0; i < keylen; ++i) {
+        std::uint32_t k1 = key[i];
+        k1 *= c1;
+        k1 = (k1 << 15) | (k1 >> 17);
+        k1 *= c2;
+        h1 ^= k1;
+        h1 = (h1 << 13) | (h1 >> 19);
+        h1 = h1 * 5 + 0xe6546b64;
+    }
+
+    h1 ^= keylen;
+    h1 ^= h1 >> 16;
+    h1 *= 0x85ebca6b;
+    h1 ^= h1 >> 13;
+    h1 *= 0xc2b2ae35;
+    h1 ^= h1 >> 16;
+
+    std::cout << "User hash for key '" << std::string(key, keylen) << "' (seed=" << seed << ", m=" << m << "): " << (h1 % m) << "\n";
+    return h1 % m;
+}
