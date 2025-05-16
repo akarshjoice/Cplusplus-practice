@@ -1,0 +1,283 @@
+bmz.h
+
+#ifndef __CMPH_BMZ_H__
+#define __CMPH_BMZ_H__
+
+#include "cmph.h"
+
+typedef struct __bmz_data_t bmz_data_t;
+typedef struct __bmz_config_data_t bmz_config_data_t;
+
+bmz_config_data_t *bmz_config_new(void);
+void bmz_config_set_hashfuncs(cmph_config_t *mph, CMPH_HASH *hashfuncs);
+void bmz_config_destroy(cmph_config_t *mph);
+cmph_t *bmz_new(cmph_config_t *mph, double c);
+
+void bmz_load(FILE *f, cmph_t *mphf);
+int bmz_dump(cmph_t *mphf, FILE *f);
+void bmz_destroy(cmph_t *mphf);
+cmph_uint32 bmz_search(cmph_t *mphf, const char *key, cmph_uint32 keylen);
+
+// Standalone Jenkins hash for user program
+cmph_uint32 bmz_raw_jenkins_hash(const char *key, cmph_uint32 keylen, cmph_uint32 seed, cmph_uint32 m);
+
+/** \fn void bmz_pack(cmph_t *mphf, void *packed_mphf);
+ *  \brief Support the ability to pack a perfect hash function into a preallocated contiguous memory space pointed by packed_mphf.
+ *  \param mphf pointer to the resulting mphf
+ *  \param packed_mphf pointer to the contiguous memory area used to store the resulting mphf.
+ */
+void bmz_pack(cmph_t *mphf, void *packed_mphf);
+
+/** \fn cmph_uint32 bmz_packed_size(cmph_t *mphf);
+ *  \brief Return the amount of space needed to pack mphf.
+ *  \param mphf pointer to a mphf
+ *  \return the size of the packed function or zero for failures
+ */
+cmph_uint32 bmz_packed_size(cmph_t *mphf);
+
+/** \fn cmph_uint32 bmz_search_packed(void *packed_mphf, const char *key, cmph_uint32 keylen);
+ *  \brief Use the packed mphf to do a search.
+ *  \param packed_mphf pointer to the packed mphf
+ *  \param key key to be hashed
+ *  \param keylen key length in bytes
+ *  \return The mphf value
+ */
+cmph_uint32 bmz_search_packed(void *packed_mphf, const char *key, cmph_uint32 keylen);
+
+#endif
+
+bmz_structs.h
+#ifndef __CMPH_BMZ_STRUCTS_H__
+#define __CMPH_BMZ_STRUCTS_H__
+
+#include "cmph.h"
+
+struct __bmz_data_t {
+    cmph_uint32 m; // keys count
+    cmph_uint32 n; // hash range (n >= m)
+    cmph_uint32 seed; // Seed for Jenkins hash
+};
+
+struct __bmz_config_data_t {
+    CMPH_HASH hashfunc; // Jenkins hash type
+    cmph_uint32 m; // keys count
+    cmph_uint32 n; // hash range
+    cmph_uint32 seed; // Seed for Jenkins hash
+};
+
+#endif
+
+bmz.cpp
+#include "bmz.h"
+#include "cmph_structs.h"
+#include "bitbool.h"
+
+#include <math.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <assert.h>
+#include <string.h>
+
+// #define DEBUG
+#include "debug.h"
+
+bmz_config_data_t *bmz_config_new(void) {
+    bmz_config_data_t *bmz = (bmz_config_data_t *)malloc(sizeof(bmz_config_data_t));
+    if (!bmz) return NULL;
+    memset(bmz, 0, sizeof(bmz_config_data_t));
+    bmz->hashfunc = CMPH_HASH_JENKINS;
+    bmz->seed = 0; // Default seed
+    return bmz;
+}
+
+void bmz_config_destroy(cmph_config_t *mph) {
+    bmz_config_data_t *data = (bmz_config_data_t *)mph->data;
+    DEBUGP("Destroying config data\n");
+    free(data);
+}
+
+void bmz_config_set_hashfuncs(cmph_config_t *mph, CMPH_HASH *hashfuncs) {
+    bmz_config_data_t *bmz = (bmz_config_data_t *)mph->data;
+    if (*hashfuncs != CMPH_HASH_COUNT) {
+        bmz->hashfunc = *hashfuncs;
+    }
+}
+
+cmph_uint32 bmz_raw_jenkins_hash(const char *key, cmph_uint32 keylen, cmph_uint32 seed, cmph_uint32 m) {
+    cmph_uint32 hash = seed;
+    for (cmph_uint32 i = 0; i < keylen; ++i) {
+        hash += key[i];
+        hash += (hash << 10);
+        hash ^= (hash >> 6);
+    }
+    hash += (hash << 3);
+    hash ^= (hash >> 11);
+    hash += (hash << 15);
+    return hash % m;
+}
+
+cmph_t *bmz_new(cmph_config_t *mph, double c) {
+    cmph_t *mphf = NULL;
+    bmz_data_t *bmzf = NULL;
+    cmph_uint32 iterations = 100;
+    cmph_uint8 *used_values = NULL;
+
+    bmz_config_data_t *bmz = (bmz_config_data_t *)mph->data;
+    if (c == 0) c = 1.15;
+    DEBUGP("c: %f\n", c);
+    bmz->m = mph->key_source->nkeys;
+    bmz->n = (cmph_uint32)ceil(c * mph->key_source->nkeys);
+    DEBUGP("m (keys): %u n (range): %u c: %f\n", bmz->m, bmz->n, c);
+
+    do {
+        bmz->seed = (cmph_uint32)rand(); // Random seed
+        used_values = (cmph_uint8 *)calloc(bmz->m / 8 + 1, 1);
+
+        mph->key_source->rewind(mph->key_source->data);
+        int ok = 1;
+        for (cmph_uint32 i = 0; i < mph->key_source->nkeys; ++i) {
+            cmph_uint32 h;
+            cmph_uint32 keylen;
+            char *key = NULL;
+            mph->key_source->read(mph->key_source->data, &key, &keylen);
+            h = bmz_raw_jenkins_hash(key, keylen, bmz->seed, bmz->m);
+            if (GETBIT(used_values, h)) {
+                ok = 0; // Collision
+                mph->key_source->dispose(mph->key_source->data, key, keylen);
+                break;
+            }
+            SETBIT(used_values, h);
+            mph->key_source->dispose(mph->key_source->data, key, keylen);
+        }
+
+        if (!ok) {
+            --iterations;
+            free(used_values);
+            if (mph->verbosity) {
+                fprintf(stderr, "Collision detected - %u iterations remaining\n", iterations);
+            }
+            if (iterations == 0) return NULL;
+            continue;
+        }
+
+        mphf = (cmph_t *)malloc(sizeof(cmph_t));
+        mphf->algo = mph->algo;
+        bmzf = (bmz_data_t *)malloc(sizeof(bmz_data_t));
+        bmzf->seed = bmz->seed;
+        bmzf->n = bmz->n;
+        bmzf->m = bmz->m;
+        mphf->data = bmzf;
+        mphf->size = bmz->m;
+
+        free(used_values);
+        break;
+    } while (iterations > 0);
+
+    if (mph->verbosity) {
+        fprintf(stderr, "Successfully generated minimal perfect hash function\n");
+    }
+    return mphf;
+}
+
+int bmz_dump(cmph_t *mphf, FILE *fd) {
+    bmz_data_t *data = (bmz_data_t *)mphf->data;
+    __cmph_dump(mphf, fd);
+    fwrite(&data->seed, sizeof(cmph_uint32), 1, fd);
+    fwrite(&data->n, sizeof(cmph_uint32), 1, fd);
+    fwrite(&data->m, sizeof(cmph_uint32), 1, fd);
+    return 1;
+}
+
+void bmz_load(FILE *f, cmph_t *mphf) {
+    bmz_data_t *bmz = (bmz_data_t *)malloc(sizeof(bmz_data_t));
+    mphf->data = bmz;
+    fread(&bmz->seed, sizeof(cmph_uint32), 1, f);
+    fread(&bmz->n, sizeof(cmph_uint32), 1, f);
+    fread(&bmz->m, sizeof(cmph_uint32), 1, f);
+}
+
+cmph_uint32 bmz_search(cmph_t *mphf, const char *key, cmph_uint32 keylen) {
+    bmz_data_t *bmz = (bmz_data_t *)mphf->data;
+    cmph_uint32 h = bmz_raw_jenkins_hash(key, keylen, bmz->seed, bmz->m);
+    DEBUGP("key: %.*s h: %u\n", keylen, key, h);
+    return h;
+}
+
+void bmz_destroy(cmph_t *mphf) {
+    bmz_data_t *data = (bmz_data_t *)mphf->data;
+    free(data);
+    free(mphf);
+}
+
+void bmz_pack(cmph_t *mphf, void *packed_mphf) {
+    bmz_data_t *data = (bmz_data_t *)mphf->data;
+    cmph_uint8 *ptr = (cmph_uint8 *)packed_mphf;
+    *((cmph_uint32 *)ptr) = data->seed;
+    ptr += sizeof(cmph_uint32);
+    *((cmph_uint32 *)ptr) = data->n;
+    ptr += sizeof(cmph_uint32);
+    *((cmph_uint32 *)ptr) = data->m;
+}
+
+cmph_uint32 bmz_packed_size(cmph_t *mphf) {
+    return (cmph_uint32)(sizeof(CMPH_ALGO) + 3 * sizeof(cmph_uint32));
+}
+
+cmph_uint32 bmz_search_packed(void *packed_mphf, const char *key, cmph_uint32 keylen) {
+    cmph_uint8 *ptr = (cmph_uint8 *)packed_mphf;
+    cmph_uint32 seed = *((cmph_uint32 *)ptr);
+    ptr += sizeof(cmph_uint32);
+    cmph_uint32 n = *((cmph_uint32 *)ptr);
+    ptr += sizeof(cmph_uint32);
+    cmph_uint32 m = *((cmph_uint32 *)ptr);
+    return bmz_raw_jenkins_hash(key, keylen, seed, m);
+}
+
+bmz_user.cpp
+#include "cmph.h"
+#include <stdio.h>
+#include <string.h>
+
+// Standalone Jenkins hash function
+unsigned int bmz_raw_jenkins_hash(const char *key, unsigned int keylen, unsigned int seed, unsigned int m) {
+    unsigned int hash = seed;
+    for (unsigned int i = 0; i < keylen; ++i) {
+        hash += key[i];
+        hash += (hash << 10);
+        hash ^= (hash >> 6);
+    }
+    hash += (hash << 3);
+    hash ^= (hash >> 11);
+    hash += (hash << 15);
+    return hash % m;
+}
+
+int main() {
+    // Create MPHF
+    cmph_io_adapter_t *source = cmph_io_vector_adapter((char *[]){"key1", "key2", "key3"}, 3);
+    cmph_config_t *config = cmph_config_new(source);
+    cmph_config_set_algo(config, CMPH_BMZ);
+    cmph_t *mphf = bmz_new(config, 1.15);
+    if (!mphf) {
+        fprintf(stderr, "Failed to create MPHF\n");
+        return 1;
+    }
+
+    // Get seed and m from MPHF
+    bmz_data_t *bmz = (bmz_data_t *)mphf->data;
+    unsigned int seed = bmz->seed;
+    unsigned int m = bmz->m;
+
+    // Direct lookup using raw Jenkins hash
+    const char *key = "key1";
+    unsigned int hash = bmz_raw_jenkins_hash(key, strlen(key), seed, m);
+    printf("Hash for %s: %u\n", key, hash);
+
+    // Clean up
+    cmph_config_destroy(config);
+    cmph_destroy(mphf);
+    cmph_io_vector_adapter_destroy(source);
+    return 0;
+}
+
+
