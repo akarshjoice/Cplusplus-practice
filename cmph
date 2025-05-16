@@ -1,0 +1,86 @@
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <string>
+#include <cmph.h>
+#include <cstring>
+
+int main() {
+    // Step 1: Load symbols from file
+    std::vector<std::string> symbols;
+    std::ifstream input_file("symbols.txt");
+    if (!input_file) {
+        std::cerr << "Error opening symbols.txt" << std::endl;
+        return 1;
+    }
+
+    std::string symbol;
+    while (std::getline(input_file, symbol)) {
+        symbols.push_back(symbol);
+    }
+    input_file.close();
+
+    if (symbols.size() != 300000) {
+        std::cerr << "Expected 300000 symbols, found " << symbols.size() << std::endl;
+        return 1;
+    }
+
+    // Step 2: Prepare CMPH source adapter
+    cmph_io_adapter_t *source = cmph_io_vector_adapter(
+        const_cast<char**>(symbols.data()),
+        static_cast<unsigned int>(symbols.size())
+    );
+
+    // Step 3: Configure CHD algorithm
+    cmph_config_t *config = cmph_config_new(source);
+    cmph_config_set_algo(config, CMPH_CHD); // Set CHD algorithm
+    cmph_config_set_verbosity(config, 1);   // Optional: Set verbosity level
+    cmph_config_set_graphsize(config, 0.99); // Load factor (default is fine for CHD)
+
+    // Step 4: Generate perfect hash function
+    cmph_t *hash = cmph_new(config);
+    if (!hash) {
+        std::cerr << "Error creating perfect hash function" << std::endl;
+        cmph_config_destroy(config);
+        cmph_io_vector_adapter_destroy(source);
+        return 1;
+    }
+
+    // Step 5: Save the hash function to a file (optional)
+    FILE *hash_file = fopen("perfect_hash.mph", "wb");
+    if (hash_file) {
+        cmph_dump(hash, hash_file);
+        fclose(hash_file);
+        std::cout << "Perfect hash function saved to perfect_hash.mph" << std::endl;
+    }
+
+    // Step 6: Example lookup
+    for (size_t i = 0; i < 10 && i < symbols.size(); ++i) { // Test first 10 symbols
+        const char *key = symbols[i].c_str();
+        unsigned int hash_value = cmph_search(hash, key, strlen(key));
+        std::cout << "Symbol: " << key << ", Hash: " << hash_value << std::endl;
+    }
+
+    // Step 7: Verify uniqueness (optional)
+    std::vector<bool> hash_check(symbols.size(), false);
+    bool collision = false;
+    for (const auto& sym : symbols) {
+        unsigned int h = cmph_search(hash, sym.c_str(), sym.length());
+        if (h >= symbols.size() || hash_check[h]) {
+            collision = true;
+            std::cerr << "Collision or out-of-range hash detected for " << sym << std::endl;
+            break;
+        }
+        hash_check[h] = true;
+    }
+    if (!collision) {
+        std::cout << "All symbols hashed uniquely!" << std::endl;
+    }
+
+    // Step 8: Cleanup
+    cmph_destroy(hash);
+    cmph_config_destroy(config);
+    cmph_io_vector_adapter_destroy(source);
+
+    return 0;
+}
