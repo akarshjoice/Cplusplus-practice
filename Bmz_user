@@ -280,4 +280,55 @@ int main() {
     return 0;
 }
 
+user.cpp
+#include <string>
+#include <iostream>
+#include "cmph.h"
 
+extern "C" {
+    #include "bmz.h"
+    #include "bmz_structs.h"
+}
+
+// Standalone Jenkins hash function
+uint32_t bmz_raw_jenkins_hash(const char *key, uint32_t keylen, uint32_t seed, uint32_t m) {
+    uint32_t hash = seed;
+    for (uint32_t i = 0; i < keylen; ++i) {
+        hash += key[i];
+        hash += (hash << 10);
+        hash ^= (hash >> 6);
+    }
+    hash += (hash << 3);
+    hash ^= (hash >> 11);
+    hash += (hash << 15);
+    return hash % m;
+}
+
+int main() {
+    // Create MPHF
+    const char *keys[] = {"key1", "key2", "key3"};
+    cmph_io_adapter_t *source = cmph_io_vector_adapter(const_cast<char **>(keys), 3);
+    cmph_config_t *config = cmph_config_new(source);
+    cmph_config_set_algo(config, CMPH_BMZ);
+    cmph_t *mphf = bmz_new(config, 1.15);
+    if (!mphf) {
+        std::cerr << "Failed to create MPHF\n";
+        return 1;
+    }
+
+    // Get seed and m from MPHF
+    bmz_data_t *bmz = static_cast<bmz_data_t *>(mphf->data);
+    uint32_t seed = bmz->seed;
+    uint32_t m = bmz->m;
+
+    // Direct lookup
+    std::string key = "key1";
+    uint32_t hash = bmz_raw_jenkins_hash(key.c_str(), static_cast<uint32_t>(key.length()), seed, m);
+    std::cout << "Hash for " << key << ": " << hash << "\n";
+
+    // Clean up
+    cmph_config_destroy(config);
+    cmph_destroy(mphf);
+    cmph_io_vector_adapter_destroy(source);
+    return 0;
+}
