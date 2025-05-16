@@ -84,3 +84,156 @@ int main() {
 
     return 0;
 }
+
+#include <cmph.h>
+#include <fstream>
+#include <iostream>
+#include <vector>
+#include <string>
+#include <cstdint>
+#include <cstring>
+
+// BMZ parameters structure (matches cmph_bmz_params_t)
+struct BMZParameters {
+    uint32_t n; // Number of keys
+    uint32_t m; // Rank table size
+    uint32_t seed; // Hash seed
+    uint32_t* g; // Rank table (pointer to CMPH-managed memory)
+    uint32_t hashfunc; // Hash function type
+};
+
+// Jenkins hash (matches CMPH’s implementation in hash.c)
+uint32_t jenkins_hash(const char *key, size_t len, uint32_t seed) {
+    uint32_t hash = seed;
+    for (size_t i = 0; i < len; ++i) {
+        hash += (uint8_t)key[i];
+        hash += (hash << 10);
+        hash ^= (hash >> 6);
+    }
+    hash += (hash << 3);
+    hash ^= (hash >> 11);
+    hash += (hash << 15);
+    return hash;
+}
+
+// Raw BMZ lookup
+uint32_t raw_bmz_lookup(const char *key, size_t key_len, const BMZParameters ¶ms) {
+    if (params.hashfunc != CMPH_HASH_JENKINS) {
+        return UINT32_MAX; // Unsupported hash function
+    }
+    uint32_t h = jenkins_hash(key, key_len, params.seed) % params.m;
+    uint32_t index = params.g[h];
+    return (index < params.n) ? index : UINT32_MAX;
+}
+
+int main() {
+    // Step 1: Load symbols from file
+    std::vector<std::string> symbols;
+    std::ifstream input_file("symbols.txt");
+    if (!input_file) {
+        std::cerr << "Error opening symbols.txt" << std::endl;
+        return 1;
+    }
+
+    std::string symbol;
+    while (std::getline(input_file, symbol)) {
+        symbols.push_back(symbol);
+    }
+    input_file.close();
+
+    if (symbols.size() != 300000) {
+        std::cerr << "Expected 300000 symbols, found " << symbols.size() << std::endl;
+        return 1;
+    }
+
+    // Step 2: Prepare CMPH source adapter
+    std::vector<char*> c_symbols;
+    for (auto& s : symbols) c_symbols.push_back(const_cast<char*>(s.c_str()));
+    cmph_io_adapter_t *source = cmph_io_vector_adapter(c_symbols.data(), symbols.size());
+
+    // Step 3: Configure BMZ algorithm
+    cmph_config_t *config = cmph_config_new(source);
+    cmph_config_set_algo(config, CMPH_BMZ);
+    cmph_config_set_verbosity(config, 1);
+    cmph_config_set_graphsize(config, 0.99); // Adjust if needed
+
+    // Step 4: Generate perfect hash function
+    cmph_t *hash = cmph_new(config);
+    if (!hash) {
+        std::cerr << "Error creating perfect hash function" << std::endl;
+        cmph_config_destroy(config);
+        cmph_io_vector_adapter_destroy(source);
+        return 1;
+    }
+
+    // Step 5: Extract BMZ parameters
+    cmph_bmz_params_t *cmph_params = cmph_bmz_get_params(hash);
+    if (!cmph_params) {
+        std::cerr << "Error extracting BMZ parameters" << std::endl;
+        cmph_destroy(hash);
+        cmph_config_destroy(config);
+        cmph_io_vector_adapter_destroy(source);
+        return 1;
+    }
+
+    BMZParameters params;
+    params.n = cmph_params->n;
+    params.m = cmph_params->m;
+    params.seed = cmph_params->seed;
+    params.g = cmph_params->g;
+    params.hashfunc = cmph_params->hashfunc;
+
+    // Print parameters
+    std::cout << "BMZ Parameters:\n"
+              << "n: " << params.n << "\n"
+              << "m: " << params.m << "\n"
+              << "seed: " << params.seed << "\n"
+              << "hashfunc: " << params.hashfunc << "\n"
+              << "Rank table size: " << params.m << "\n";
+
+    // Step 6: Save rank table to binary file for FPGA
+    std::ofstream table_file("rank_table.bin", std::ios::binary);
+    if (!table_file) {
+        std::cerr << "Error opening rank_table.bin for writing" << std::endl;
+        free(cmph_params);
+        cmph_destroy(hash);
+        cmph_config_destroy(config);
+        cmph_io_vector_adapter_destroy(source);
+        return 1;
+    }
+    table_file.write((char*)params.g, params.m * sizeof(uint32_t));
+    table_file.close();
+    std::cout << "Rank table saved to rank_table.bin\n";
+
+    // Step 7: Validate raw lookup against cmph_search
+    bool valid = true;
+    for (size_t i = 0; i < symbols.size(); ++i) {
+        const char *key = symbols[i].c_str();
+        uint32_t cmph_hash = cmph_search(hash, key, strlen(key));
+        uint32_t raw_hash = raw_bmz_lookup(key, strlen(key), params);
+        if (cmph_hash != raw_hash) {
+            std::cerr << "Mismatch for symbol " << key << ": cmph=" << cmph_hash
+                      << ", raw=" << raw_hash << std::endl;
+            valid = false;
+            break;
+        }
+    }
+    if (valid) {
+        std::cout << "All " << symbols.size() << " symbols hashed correctly with raw lookup\n";
+    }
+
+    // Step 8: Example lookup
+    for (size_t i = 0; i < 10 && i < symbols.size(); ++i) {
+        const char *key = symbols[i].c_str();
+        uint32_t hash_value = raw_bmz_lookup(key, strlen(key), params);
+        std::cout << "Symbol: " << key << ", Raw Hash: " << hash_value << std::endl;
+    }
+
+    // Step 9: Cleanup
+    free(cmph_params); // Free params structure, but not g (managed by cmph_t)
+    cmph_destroy(hash);
+    cmph_config_destroy(config);
+    cmph_io_vector_adapter_destroy(source);
+
+    return 0;
+}
