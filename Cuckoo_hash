@@ -1,0 +1,158 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <cstring>
+
+// Cuckoo hash table for option symbols
+class CuckooHashTable {
+private:
+    struct Slot {
+        const std::string* key; // Pointer to string to save space
+        bool occupied;
+        Slot() : key(nullptr), occupied(false) {}
+    };
+
+    std::vector<Slot> table; // Fixed-size table
+    size_t table_size;       // Number of slots
+    size_t seed1, seed2;     // Seeds for hash functions
+    static const size_t MAX_DISPLACEMENTS = 100; // Cycle detection limit
+
+    // Custom hash function 1 (inspired by djb2)
+    size_t hash1(const std::string& key) const {
+        size_t hash = seed1;
+        for (char c : key) {
+            hash = ((hash << 5) + hash) + static_cast<size_t>(c); // hash * 33 + c
+        }
+        return hash % table_size;
+    }
+
+    // Custom hash function 2 (inspired by sdbm)
+    size_t hash2(const std::string& key) const {
+        size_t hash = seed2;
+        for (char c : key) {
+            hash = static_cast<size_t>(c) + (hash << 6) + (hash << 16) - hash;
+        }
+        return hash % table_size;
+    }
+
+    // Insert a key into the table, return false if cycle detected
+    bool insert_key(const std::string* key, size_t displacement_count) {
+        if (displacement_count > MAX_DISPLACEMENTS) {
+            return false; // Cycle detected
+        }
+
+        size_t pos1 = hash1(*key);
+        size_t pos2 = hash2(*key);
+
+        // Try first position
+        if (!table[pos1].occupied) {
+            table[pos1].key = key;
+            table[pos1].occupied = true;
+            return true;
+        } else if (!table[pos2].occupied) {
+            table[pos2].key = key;
+            table[pos2].occupied = true;
+            return true;
+        } else {
+            // Displace key from pos1
+            const std::string* displaced_key = table[pos1].key;
+            table[pos1].key = key;
+            return insert_key(displaced_key, displacement_count + 1);
+        }
+    }
+
+public:
+    CuckooHashTable(size_t num_keys, size_t seed1_val = 5381, size_t seed2_val = 97)
+        : table_size(num_keys / 0.8), seed1(seed1_val), seed2(seed2_val) {
+        table.resize(table_size);
+    }
+
+    // Build the table from a vector of strings, return false if insertion fails
+    bool build(const std::vector<std::string>& keys) {
+        // Clear table
+        for (auto& slot : table) {
+            slot.key = nullptr;
+            slot.occupied = false;
+        }
+
+        // Insert all keys
+        for (const auto& key : keys) {
+            if (!insert_key(&key, 0)) {
+                return false; // Insertion failed due to cycle
+            }
+        }
+        return true;
+    }
+
+    // Lookup a key, return true if found
+    bool find(const std::string& key) const {
+        size_t pos1 = hash1(key);
+        size_t pos2 = hash2(key);
+
+        if (table[pos1].occupied && *table[pos1].key == key) {
+            return true;
+        }
+        if (table[pos2].occupied && *table[pos2].key == key) {
+            return true;
+        }
+        return false;
+    }
+
+    // Get table size (for debugging)
+    size_t size() const { return table_size; }
+};
+
+// Example usage
+int main() {
+    // Sample option symbols (1M would be too large for demo)
+    std::vector<std::string> symbols = {
+        "AAPL250620C00500000",
+        "GOOGL250620P00750000",
+        "TSLA250620C01000000",
+        // Add more symbols...
+    };
+
+    // Initialize table for ~1M keys
+    CuckooHashTable table(1'000'000);
+
+    // Try building with different seeds until success
+    size_t seed1 = 5381, seed2 = 97;
+    bool success = false;
+    int attempts = 0;
+    const int MAX_ATTEMPTS = 10;
+
+    while (!success && attempts < MAX_ATTEMPTS) {
+        table = CuckooHashTable(1'000'000, seed1, seed2);
+        success = table.build(symbols);
+        if (!success) {
+            seed1 += 1000;
+            seed2 += 1000;
+            attempts++;
+            std::cout << "Insertion failed, retrying with seeds " << seed1 << ", " << seed2 << "\n";
+        }
+    }
+
+    if (success) {
+        std::cout << "Table built successfully with " << table.size() << " slots\n";
+    } else {
+        std::cout << "Failed to build table after " << MAX_ATTEMPTS << " attempts\n";
+        return 1;
+    }
+
+    // Test lookups
+    for (const auto& symbol : symbols) {
+        if (table.find(symbol)) {
+            std::cout << "Found: " << symbol << "\n";
+        } else {
+            std::cout << "Not found: " << symbol << "\n";
+        }
+    }
+
+    // Test a missing key
+    std::string missing = "SPY250620C00400000";
+    if (!table.find(missing)) {
+        std::cout << "Correctly not found: " << missing << "\n";
+    }
+
+    return 0;
+}
