@@ -1,0 +1,212 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <cstdint>
+
+// Cuckoo hash table for option symbols
+class CuckooHashTable {
+private:
+    struct Slot {
+        const std::string* key; // Pointer to string
+        bool occupied;
+        Slot() : key(nullptr), occupied(false) {}
+    };
+
+    std::vector<Slot> table;        // Main table
+    std::vector<const std::string*> stash; // Small stash for problematic keys
+    size_t table_size;              // Number of slots
+    uint64_t seed1, seed2;          // Seeds for hash functions
+    static const size_t MAX_DISPLACEMENTS = 100; // Cycle detection limit
+    static const size_t STASH_SIZE = 5; // Max stash size
+
+    // Custom hash function 1 (MurmurHash-inspired)
+    size_t hash1(const std::string& key) const {
+        uint64_t hash = seed1;
+        const uint64_t m = 0xc6a4a7935bd1e995ULL;
+        const int r = 47;
+
+        for (size_t i = 0; i < key.length(); ++i) {
+            uint64_t k = static_cast<uint64_t>(key[i]);
+            k *= m;
+            k ^= k >> r;
+            k *= m;
+            hash ^= k;
+            hash *= m;
+        }
+
+        hash ^= hash >> r;
+        hash *= m;
+        hash ^= hash >> r;
+        return static_cast<size_t>(hash % table_size);
+    }
+
+    // Custom hash function 2 (alternative mixing)
+    size_t hash2(const std::string& key) const {
+        uint64_t hash = seed2;
+        const uint64_t m = 0x5bd1e995ULL;
+        const int r = 24;
+
+        for (size_t i = 0; i < key.length(); ++i) {
+            uint64_t k = static_cast<uint64_t>(key[i]);
+            k *= m;
+            k ^= k >> r;
+            k *= m;
+            hash += k;
+            hash *= m;
+        }
+
+        hash ^= hash >> r;
+        hash *= m;
+        hash ^= hash >> r;
+        return static_cast<size_t>(hash % table_size);
+    }
+
+    // Insert a key, return false if cycle detected
+    bool insert_key(const std::string* key, size_t displacement_count) {
+        if (displacement_count > MAX_DISPLACEMENTS) {
+            // Try stash if not full
+            if (stash.size() < STASH_SIZE) {
+                stash.push_back(key);
+                return true;
+            }
+            return false; // Cycle and stash full
+        }
+
+        size_t pos1 = hash1(*key);
+        size_t pos2 = hash2(*key);
+
+        // Try first position
+        if (!table[pos1].occupied) {
+            table[pos1].key = key;
+            table[pos1].occupied = true;
+            return true;
+        }
+        // Try second position
+        if (!table[pos2].occupied) {
+            table[pos2].key = key;
+            table[pos2].occupied = true;
+            return true;
+        }
+
+        // Displace key from pos1
+        const std::string* displaced_key = table[pos1].key;
+        table[pos1].key = key;
+        return insert_key(displaced_key, displacement_count + 1);
+    }
+
+public:
+    CuckooHashTable(size_t num_keys, uint64_t seed1_val = 0xdeadbeefULL, uint64_t seed2_val = 0xcafef00dULL)
+        : table_size(num_keys / 0.8), seed1(seed1_val), seed2(seed2_val) {
+        table.resize(table_size);
+        stash.reserve(STASH_SIZE);
+    }
+
+    // Build the table, return false if insertion fails
+    bool build(const std::vector<std::string>& keys) {
+        // Clear table and stash
+        for (auto& slot : table) {
+            slot.key = nullptr;
+            slot.occupied = false;
+        }
+        stash.clear();
+
+        // Insert all keys
+        for (const auto& key : keys) {
+            if (!insert_key(&key, 0)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Lookup a key
+    bool find(const std::string& key) const {
+        // Check main table
+        size_t pos1 = hash1(key);
+        size_t pos2 = hash2(key);
+
+        if (table[pos1].occupied && *table[pos1].key == key) {
+            return true;
+        }
+        if (table[pos2].occupied && *table[pos2].key == key) {
+            return true;
+        }
+
+        // Check stash
+        for (const auto* stashed_key : stash) {
+            if (*stashed_key == key) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    size_t size() const { return table_size; }
+    size_t stash_usage() const { return stash.size(); }
+};
+
+// Generate dummy option symbols
+std::vector<std::string> generate_symbols(size_t n) {
+    std::vector<std::string> symbols;
+    symbols.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        // Format: AAPL250620C<strike>
+        symbols.push_back("AAPL250620C" + std::to_string(100000 + i));
+    }
+    return symbols;
+}
+
+int main() {
+    // 10,000 symbols
+    auto symbols = generate_symbols(10'000);
+    const size_t num_keys = symbols.size();
+    const size_t target_table_size = num_keys / 0.8; // ~12,500 slots
+
+    // Try building with different seeds
+    uint64_t seed1 = 0xdeadbeefULL, seed2 = 0xcafef00dULL;
+    bool success = false;
+    int attempts = 0;
+    const int MAX_ATTEMPTS = 10;
+    CuckooHashTable table(num_keys, seed1, seed2);
+
+    while (!success && attempts < MAX_ATTEMPTS) {
+        table = CuckooHashTable(num_keys, seed1, seed2);
+        success = table.build(symbols);
+        if (!success) {
+            seed1 += 0x1000ULL;
+            seed2 += 0x2000ULL;
+            attempts++;
+            std::cout << "Insertion failed, retrying with seeds " << seed1 << ", " << seed2 << "\n";
+        }
+    }
+
+    if (success) {
+        std::cout << "Table built successfully with " << table.size() << " slots (load factor: "
+                  << static_cast<double>(num_keys) / table.size() << ")\n";
+        std::cout << "Stash usage: " << table.stash_usage() << "/" << STASH_SIZE << "\n";
+    } else {
+        std::cout << "Failed to build table after " << MAX_ATTEMPTS << " attempts\n";
+        return 1;
+    }
+
+    // Test lookups
+    size_t found = 0;
+    for (const auto& symbol : symbols) {
+        if (table.find(symbol)) {
+            found++;
+        }
+    }
+    std::cout << "Found " << found << "/" << num_keys << " symbols\n";
+
+    // Test a missing key
+    std::string missing = "AAPL250620C099999";
+    if (!table.find(missing)) {
+        std::cout << "Correctly not found: " << missing << "\n";
+    }
+
+    // Test memory usage
+    size_t memory_bytes = table.size() * sizeof(Slot) + symbols.size() * sizeof(std::string);
+    std::cout << "Estimated memory: " << memory_bytes / 1024.0 / 1024.0 << " MB\n";
+
+    return 0;
+}
