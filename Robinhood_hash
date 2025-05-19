@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <cstdint>
 #include <algorithm>
 
@@ -17,7 +18,7 @@ private:
     std::vector<Slot> table; // Fixed-size table
     size_t table_size;       // Number of slots
     uint64_t seed;           // Seed for hash function
-    std::vector<size_t> collision_counts; // Track collisions
+    std::unordered_map<size_t, size_t> collision_counts; // Track collisions
     size_t max_psl;          // Track max probe length
 
     // Custom hash function (FNV-1a-inspired, no preprocessing)
@@ -27,11 +28,9 @@ private:
         for (char c : key) {
             hash ^= static_cast<uint64_t>(c);
             hash *= prime;
-            hash ^= (hash >> 23) ^ (hash << 13); // Extra mixing for structured strings
+            hash ^= (hash >> 23) ^ (hash << 13); // Extra mixing
         }
-        size_t result = static_cast<size_t>(hash % table_size);
-        collision_counts[result]++;
-        return result;
+        return static_cast<size_t>(hash % table_size);
     }
 
     // Insert a key at a position, swapping if needed
@@ -64,7 +63,7 @@ public:
     RobinHoodHashTable(size_t num_keys, uint64_t seed_val = 0xdeadbeefULL)
         : table_size(num_keys / 0.8), seed(seed_val), max_psl(0) {
         table.resize(table_size);
-        collision_counts.resize(table_size, 0);
+        collision_counts.reserve(table_size / 2); // Pre-allocate for efficiency
     }
 
     // Build the table
@@ -75,12 +74,13 @@ public:
             slot.psl = 0;
             slot.occupied = false;
         }
-        std::fill(collision_counts.begin(), collision_counts.end(), 0);
+        collision_counts.clear();
         max_psl = 0;
 
         // Insert all keys
         for (const auto& key : keys) {
             size_t pos = hash(key);
+            collision_counts[pos]++; // Track collision at initial hash position
             insert_at(pos, &key, 0);
         }
     }
@@ -107,7 +107,11 @@ public:
     size_t size() const { return table_size; }
     size_t get_max_psl() const { return max_psl; }
     size_t max_collisions() const {
-        return *std::max_element(collision_counts.begin(), collision_counts.end());
+        size_t max_count = 0;
+        for (const auto& pair : collision_counts) {
+            max_count = std::max(max_count, pair.second);
+        }
+        return max_count;
     }
 };
 
